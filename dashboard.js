@@ -13,6 +13,7 @@
   ];
   const DASHBOARD_ACTIVE_WINDOW_HOURS = 6;
   const DASHBOARD_ACTIVE_WINDOW = `${DASHBOARD_ACTIVE_WINDOW_HOURS}h`;
+  const DASHBOARD_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   let networkCatalog = [...FALLBACK_NETWORKS];
   const selectedNetworks = new Set(FALLBACK_NETWORKS.map(({ code }) => code));
   let hasInitializedNetworkSelection = false;
@@ -32,6 +33,7 @@
   const activeSensorsCaption = document.getElementById("active-sensors-caption");
   const statusEl = document.getElementById("dashboard-status");
   const updatedEl = document.getElementById("dashboard-updated");
+  const refreshButton = document.getElementById("dashboard-refresh");
   const debugEnabled = parseBooleanFlag(
     typeof WEBSITE_DEBUG_LOG_ENABLED_PLACEHOLDER === "string"
       ? WEBSITE_DEBUG_LOG_ENABLED_PLACEHOLDER
@@ -42,8 +44,10 @@
   );
   const rowsByPollutant = new Map();
   const capabilityRowsByPollutant = new Map();
-  const connectorRefreshByCode = new Map();
   let dashboardLoadedAt = null;
+  let hasCompletedDashboardRequestCycle = false;
+  let dashboardRefreshInFlight = null;
+  let dashboardRefreshTimeout = null;
   let fitValuesFrame = null;
   let fitValuesTimer = null;
 
@@ -115,39 +119,6 @@
         type: row.network_type || null,
       }))
       .filter((row) => row.code && row.label);
-  }
-
-  async function fetchConnectorRefreshMetadata() {
-    const projectRef = typeof PROJECT_REF_PLACEHOLDER === "string"
-      && !PROJECT_REF_PLACEHOLDER.includes("__SUPABASE_PROJECT_REF__")
-      ? PROJECT_REF_PLACEHOLDER.trim()
-      : "";
-    const publishableKey = typeof ANON_KEY_PLACEHOLDER === "string"
-      && !ANON_KEY_PLACEHOLDER.includes("__SB_PUBLISHABLE_DEFAULT_KEY__")
-      ? ANON_KEY_PLACEHOLDER.trim()
-      : "";
-    if (!projectRef || !publishableKey) {
-      throw new Error("Public Supabase configuration is unavailable.");
-    }
-    const url = new URL(
-      `https://${projectRef}.supabase.co/rest/v1/connector_refresh_metadata`,
-    );
-    url.searchParams.set("select", "connector_code,last_polled_at");
-    const response = await fetch(url, {
-      headers: {
-        apikey: publishableKey,
-        "Accept-Profile": "uk_aq_public",
-      },
-    });
-    if (!response.ok) {
-      console.warn(
-        `[UK AQ dashboard] Optional connector refresh metadata unavailable (${response.status}). `
-        + "Dashboard will use its successful load time.",
-      );
-      return [];
-    }
-    const payload = await response.json();
-    return Array.isArray(payload) ? payload : [];
   }
 
   async function fetchAreaNames() {
@@ -281,9 +252,45 @@
     if (size < originalSize) valueEl.classList.add("pollutant-value--fitted");
   }
 
+  function renderedTextLineCount(element) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const lineTops = [];
+
+    Array.from(range.getClientRects()).forEach((rect) => {
+      if (!lineTops.some((top) => Math.abs(top - rect.top) < 1)) {
+        lineTops.push(rect.top);
+      }
+    });
+
+    return lineTops.length;
+  }
+
+  function fitPollutantStationName(stationEl) {
+    if (!stationEl) return;
+    stationEl.style.fontSize = "";
+
+    const circle = stationEl.closest(".pollutant-circle");
+    if (!circle || circle.hidden || circle.classList.contains("pollutant-circle--inactive")
+      || circle.clientWidth <= 0 || !stationEl.textContent.trim()) return;
+
+    const originalSize = Number.parseFloat(window.getComputedStyle(stationEl).fontSize);
+    if (!Number.isFinite(originalSize) || originalSize <= 0) return;
+
+    const minimumSize = Math.max(11, originalSize * 0.68);
+    let size = originalSize;
+
+    while (renderedTextLineCount(stationEl) > 2 && size > minimumSize) {
+      size = Math.max(minimumSize, size - 0.5);
+      stationEl.style.fontSize = `${size}px`;
+    }
+  }
+
   function fitAllPollutantValues() {
     document.querySelectorAll(".pollutant-circle:not([hidden]) .pollutant-value")
       .forEach(fitPollutantValue);
+    document.querySelectorAll(".pollutant-circle:not([hidden]) .pollutant-station")
+      .forEach(fitPollutantStationName);
   }
 
   function schedulePollutantValueFit() {
@@ -589,26 +596,7 @@
   }
 
   function renderUpdated() {
-    const connectorCodes = new Set();
-    POLLUTANTS.forEach(({ key }) => {
-      const baselineRows = capabilityRowsByPollutant.get(key);
-      const rows = Array.isArray(baselineRows) ? baselineRows : (rowsByPollutant.get(key) || []);
-      rows.forEach((row) => {
-        if (!selectedNetworks.has(networkCode(row))) return;
-        const code = String(row?.connector_code || row?.connector?.connector_code || "").trim();
-        if (code) connectorCodes.add(code);
-      });
-    });
-    // For multiple selected networks, use the most recent successful connector
-    // poll: this communicates when UK AQ most recently refreshed any selected data.
-    let refreshedAt = null;
-    connectorCodes.forEach((code) => {
-      const candidate = connectorRefreshByCode.get(code);
-      if (candidate && (!refreshedAt || candidate > refreshedAt)) refreshedAt = candidate;
-    });
-    // TODO: Remove this load-time fallback once refresh metadata is guaranteed on
-    // the public connector surface. Never substitute a sensor observation time.
-    const displayedAt = refreshedAt || dashboardLoadedAt;
+    const displayedAt = dashboardLoadedAt;
     updatedEl.textContent = displayedAt ? `Updated ${formatDate(displayedAt)}` : "Updated —";
     updatedEl.setAttribute(
       "aria-label",
@@ -629,84 +617,131 @@
     schedulePollutantValueFit();
   }
 
-  async function load() {
-    dashboard?.classList.add("is-loading");
-    try {
-      const [results, capabilityResults, catalogResult, areaNamesResult, refreshMetadataResult] = await Promise.all([
-        Promise.allSettled(POLLUTANTS.map(({ key }) => fetchRows(key))),
-        Promise.allSettled(POLLUTANTS.map(({ key }) => fetchRows(key, "all"))),
-        Promise.resolve(fetchNetworkCatalog()).then(
-          (value) => ({ status: "fulfilled", value }),
-          (reason) => ({ status: "rejected", reason }),
-        ),
-        Promise.resolve(fetchAreaNames()).then(
-          () => ({ status: "fulfilled" }),
-          (reason) => ({ status: "rejected", reason }),
-        ),
-        Promise.resolve(fetchConnectorRefreshMetadata()).then(
-          (value) => ({ status: "fulfilled", value }),
-          (reason) => ({ status: "rejected", reason }),
-        ),
-      ]);
-      if (catalogResult.status === "fulfilled" && catalogResult.value.length) {
-        networkCatalog = catalogResult.value;
-        networkLabels.clear();
-        networkCatalog.forEach(({ code, label }) => networkLabels.set(code, label));
-      } else if (catalogResult.status === "rejected") {
-        debugLog("Unable to load network catalog", catalogResult.reason);
-      }
-      if (areaNamesResult.status === "rejected") {
-        debugLog("Unable to load area names", areaNamesResult.reason);
-      }
-      reconcileSelectedNetworks();
-      let loaded = 0;
-      results.forEach((result, index) => {
-        const key = POLLUTANTS[index].key;
-        if (result.status === "fulfilled") {
-          rowsByPollutant.set(key, result.value);
-          loaded += 1;
-        } else {
-          rowsByPollutant.set(key, []);
-          debugLog(`Unable to load ${key}`, result.reason);
+  function setDashboardBusy(isBusy) {
+    dashboard?.classList.toggle("is-loading", isBusy);
+    dashboard?.setAttribute("aria-busy", String(isBusy));
+    if (refreshButton) {
+      refreshButton.disabled = isBusy;
+      refreshButton.setAttribute("aria-busy", String(isBusy));
+    }
+  }
+
+  function requestDashboardRefresh() {
+    if (dashboardRefreshInFlight) return dashboardRefreshInFlight;
+
+    const isInitialLoad = !hasCompletedDashboardRequestCycle;
+    setDashboardBusy(true);
+    dashboardRefreshInFlight = (async () => {
+      try {
+        const [results, capabilityResults, catalogResult, areaNamesResult] = await Promise.all([
+          Promise.allSettled(POLLUTANTS.map(({ key }) => fetchRows(key))),
+          Promise.allSettled(POLLUTANTS.map(({ key }) => fetchRows(key, "all"))),
+          Promise.resolve(fetchNetworkCatalog()).then(
+            (value) => ({ status: "fulfilled", value }),
+            (reason) => ({ status: "rejected", reason }),
+          ),
+          Promise.resolve(fetchAreaNames()).then(
+            () => ({ status: "fulfilled" }),
+            (reason) => ({ status: "rejected", reason }),
+          ),
+        ]);
+        if (catalogResult.status === "fulfilled" && catalogResult.value.length) {
+          networkCatalog = catalogResult.value;
+          networkLabels.clear();
+          networkCatalog.forEach(({ code, label }) => networkLabels.set(code, label));
+        } else if (catalogResult.status === "rejected") {
+          debugLog("Unable to load network catalog", catalogResult.reason);
         }
-      });
-      capabilityResults.forEach((result, index) => {
-        const key = POLLUTANTS[index].key;
-        if (result.status === "fulfilled") {
-          capabilityRowsByPollutant.set(key, result.value);
-        } else {
-          capabilityRowsByPollutant.set(key, null);
-          debugLog(`Unable to load ${key} capability baseline`, result.reason);
+        if (areaNamesResult.status === "rejected") {
+          debugLog("Unable to load area names", areaNamesResult.reason);
         }
-      });
-      connectorRefreshByCode.clear();
-      if (refreshMetadataResult.status === "fulfilled") {
-        refreshMetadataResult.value.forEach((row) => {
-          const code = String(row?.connector_code || "").trim();
-          const polledAt = row?.last_polled_at ? new Date(row.last_polled_at) : null;
-          if (code && polledAt && !Number.isNaN(polledAt.getTime())) {
-            connectorRefreshByCode.set(code, polledAt);
+        reconcileSelectedNetworks();
+        let loaded = 0;
+        results.forEach((result, index) => {
+          const key = POLLUTANTS[index].key;
+          if (result.status === "fulfilled") {
+            rowsByPollutant.set(key, result.value);
+            loaded += 1;
+          } else if (isInitialLoad) {
+            rowsByPollutant.set(key, []);
+            debugLog(`Unable to load ${key}`, result.reason);
+          } else {
+            debugLog(`Unable to refresh ${key}; retaining existing rows`, result.reason);
           }
         });
-      } else {
-        debugLog("Unable to load connector refresh metadata", refreshMetadataResult.reason);
+        capabilityResults.forEach((result, index) => {
+          const key = POLLUTANTS[index].key;
+          if (result.status === "fulfilled") {
+            capabilityRowsByPollutant.set(key, result.value);
+          } else if (isInitialLoad) {
+            capabilityRowsByPollutant.set(key, null);
+            debugLog(`Unable to load ${key} capability baseline`, result.reason);
+          } else {
+            debugLog(`Unable to refresh ${key} capability baseline; retaining existing rows`, result.reason);
+          }
+        });
+        if (!loaded) throw new Error("All latest-reading requests failed.");
+        statusEl.hidden = loaded === POLLUTANTS.length;
+        statusEl.classList.toggle("dashboard-status--error", loaded !== POLLUTANTS.length);
+        statusEl.textContent = loaded === POLLUTANTS.length
+          ? "" : "Some dashboard readings are temporarily unavailable.";
+        render();
+        dashboardLoadedAt = new Date();
+        renderUpdated();
+      } catch (error) {
+        render();
+        statusEl.hidden = false;
+        statusEl.classList.add("dashboard-status--error");
+        statusEl.textContent = "Live dashboard data is temporarily unavailable.";
+        debugLog("Dashboard load failed", error);
+      } finally {
+        hasCompletedDashboardRequestCycle = true;
+        setDashboardBusy(false);
       }
-      dashboardLoadedAt = new Date();
-      render();
-      if (!loaded) throw new Error("All latest-reading requests failed.");
-      statusEl.hidden = loaded === POLLUTANTS.length;
-      statusEl.classList.toggle("dashboard-status--error", loaded !== POLLUTANTS.length);
-      statusEl.textContent = loaded === POLLUTANTS.length
-        ? "" : "Some dashboard readings are temporarily unavailable.";
-    } catch (error) {
-      render();
-      statusEl.hidden = false;
-      statusEl.classList.add("dashboard-status--error");
-      statusEl.textContent = "Live dashboard data is temporarily unavailable.";
-      debugLog("Dashboard load failed", error);
-    } finally {
-      dashboard?.classList.remove("is-loading");
+    })().finally(() => {
+      dashboardRefreshInFlight = null;
+    });
+
+    return dashboardRefreshInFlight;
+  }
+
+  function isDashboardActive() {
+    return document.hidden === false && document.hasFocus() === true;
+  }
+
+  function clearDashboardRefreshTimeout() {
+    if (dashboardRefreshTimeout !== null) {
+      window.clearTimeout(dashboardRefreshTimeout);
+      dashboardRefreshTimeout = null;
     }
+  }
+
+  function scheduleNextDashboardRefresh() {
+    clearDashboardRefreshTimeout();
+    if (!isDashboardActive()) return;
+
+    const now = Date.now();
+    const nextBoundary = (Math.floor(now / DASHBOARD_REFRESH_INTERVAL_MS) + 1)
+      * DASHBOARD_REFRESH_INTERVAL_MS;
+    dashboardRefreshTimeout = window.setTimeout(() => {
+      dashboardRefreshTimeout = null;
+      if (!isDashboardActive()) return;
+      requestDashboardRefresh();
+      scheduleNextDashboardRefresh();
+    }, nextBoundary - now);
+  }
+
+  function syncDashboardRefreshSchedule() {
+    clearDashboardRefreshTimeout();
+    if (!isDashboardActive()) return;
+
+    if (
+      dashboardLoadedAt !== null
+      && Date.now() - dashboardLoadedAt.getTime() > DASHBOARD_REFRESH_INTERVAL_MS
+    ) {
+      requestDashboardRefresh();
+    }
+    scheduleNextDashboardRefresh();
   }
 
   networkPickerButton?.addEventListener("click", () => {
@@ -735,7 +770,12 @@
     window.clearTimeout(fitValuesTimer);
     fitValuesTimer = window.setTimeout(schedulePollutantValueFit, 120);
   });
+  refreshButton?.addEventListener("click", requestDashboardRefresh);
+  document.addEventListener("visibilitychange", syncDashboardRefreshSchedule);
+  window.addEventListener("focus", syncDashboardRefreshSchedule);
+  window.addEventListener("blur", clearDashboardRefreshTimeout);
   document.fonts?.ready?.then(schedulePollutantValueFit);
   applyDashboardWindowCopy();
-  load();
+  requestDashboardRefresh();
+  scheduleNextDashboardRefresh();
 })();
