@@ -37,7 +37,7 @@
 
     .home-header {
       margin: 0 auto;
-      padding: 32px 28px 24px;
+      padding: 32px 28px 0;
       background: #fbfaf7;
       text-align: left;
       box-sizing: border-box;
@@ -70,7 +70,7 @@
       position: relative;
       max-width: 1220px;
       margin: 0 auto;
-      padding: 16px 28px 96px;
+      padding: 6px 28px 96px;
       background: transparent;
       border-radius: 0;
       box-shadow: none;
@@ -1622,11 +1622,11 @@
 
     @media (max-width: 640px) {
       .home-header {
-        padding: 26px 18px 22px;
+        padding: 26px 18px 0;
       }
 
       .home-main {
-        padding: 14px 16px 84px;
+        padding: 6px 16px 84px;
         gap: 16px;
       }
 
@@ -1758,6 +1758,7 @@
 
     }
   </style>
+  <link rel="stylesheet" href="/beta-notice.css">
 </head>
 <body class="home-page">
   <div id="cic-sidebar-mount"></div>
@@ -1771,6 +1772,7 @@
   </header>
 
   <main class="home-main">
+    <div class="ukaq-beta-notice-mount" data-ukaq-beta-notice-mount></div>
     <section class="who-dashboard-card" aria-labelledby="who-guideline-title">
       <div class="who-card-header">
         <div class="who-title-group">
@@ -2014,6 +2016,7 @@
               <span class="scale-stripe-endpoint scale-stripe-endpoint--end">50+</span>
             </div>
           </div>
+		  <!--
           <nav class="pollutant-actions" aria-label="PM2.5 sensor actions">
             <a class="pollutant-action" href="/hex_map/" aria-label="Open PM2.5 sensor on Hex Map" title="Open sensor on Hex Map">
               <img src="images/UK AQ Buttons.Hex Map.svg" alt="">
@@ -2025,6 +2028,7 @@
               <img src="images/UK AQ Buttons.Chart.svg" alt="">
             </a>
           </nav>
+		  -->
         </article>
 
         <article class="pollutant-item" data-pollutant="pm10">
@@ -2060,6 +2064,7 @@
               <span class="scale-stripe-endpoint scale-stripe-endpoint--end">50+</span>
             </div>
           </div>
+		  <!--
           <nav class="pollutant-actions" aria-label="PM10 sensor actions">
             <a class="pollutant-action" href="/hex_map/" aria-label="Open PM10 sensor on Hex Map" title="Open sensor on Hex Map">
               <img src="images/UK AQ Buttons.Hex Map.svg" alt="">
@@ -2071,6 +2076,7 @@
               <img src="images/UK AQ Buttons.Chart.svg" alt="">
             </a>
           </nav>
+		  -->
         </article>
 
         <article class="pollutant-item" data-pollutant="no2">
@@ -2106,6 +2112,7 @@
               <span class="scale-stripe-endpoint scale-stripe-endpoint--end">100+</span>
             </div>
           </div>
+		  <!--
           <nav class="pollutant-actions" aria-label="NO2 sensor actions">
             <a class="pollutant-action" href="/hex_map/" aria-label="Open NO2 sensor on Hex Map" title="Open sensor on Hex Map">
               <img src="images/UK AQ Buttons.Hex Map.svg" alt="">
@@ -2117,6 +2124,7 @@
               <img src="images/UK AQ Buttons.Chart.svg" alt="">
             </a>
           </nav>
+		  -->
         </article>
       </div>
     </section>
@@ -2624,5 +2632,6 @@
     })();
   </script>
   <script src="sidebar.js"></script>
+  <script src="/beta-notice.js"></script>
 </body>
 </html>

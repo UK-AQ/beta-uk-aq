@@ -16,7 +16,7 @@
       showLabel: false,
       children: [
         { label: 'Hex Map',     iconImg: 'uk-aq-hex-map-sidebar.svg', href: '/hex_map/' },
-        { label: 'Sensors',     iconImg: 'uk-aq-sensors-icon-blue.svg',  href: '/sensors/' },
+        //{ label: 'Sensors',     iconImg: 'uk-aq-sensors-icon-blue.svg',  href: '/sensors/' },
         { label: 'Sensor Map', iconImg: 'uk-aq-location-pin.svg',       href: '/sensor_map/' },
       ],
     },
@@ -227,10 +227,14 @@
       z-index: 10011;
       display: block;
       border-radius: 16px;
-      overflow: hidden;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      overflow: visible;
+      cursor: pointer;
     }
-    #ukaq-home-logo:hover { transform: translateY(-1px); box-shadow: 0 8px 14px rgba(20,34,37,0.12); }
+    #ukaq-home-logo:hover { cursor: pointer; }
+    #ukaq-home-logo:focus-visible {
+      outline: 3px solid rgba(60, 120, 172, 0.55);
+      outline-offset: 4px;
+    }
     #ukaq-home-logo img {
       width: 104px; height: 104px;
       object-fit: contain; display: block;
