@@ -384,7 +384,7 @@
 
   // ─── HTML builders ────────────────────────────────────────────────────────────
   const UK_AQ_ROOT_HOSTS = new Set([
-    'test-uk-aq.ukaq.co.uk',
+    'beta.ukaq.co.uk',
   ]);
 
   function resolveHref(href) {
@@ -441,7 +441,7 @@
         ${NAV.map(buildSection).join('')}
       </nav>
       <div id="cic-sidebar-footer">
-        test-uk-aq.ukaq.co.uk·${SITE_VERSION}
+        beta.ukaq.co.uk·${SITE_VERSION}
       </div>`;
   }
 
