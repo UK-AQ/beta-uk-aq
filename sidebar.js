@@ -54,6 +54,7 @@
     href: '/',
     className: 'cic-home-nav-item',
   };
+  const SITE_VERSION = 'v0.2.2026.07';
   const SIDEBAR_ICON_OFF = '/sidebar-images/uk-aq-sidebar-off.svg';
   const SIDEBAR_ICON_ON = '/sidebar-images/uk-aq-sidebar-on.svg';
 
@@ -95,6 +96,11 @@
   function isHomePage() {
     const p = location.pathname;
     return p === '/' || p === '/index.html' || p === '';
+  }
+
+  function isSensorMapPage() {
+    const p = location.pathname;
+    return p === '/sensor_map/' || p === '/sensor_map/index.html';
   }
 
   function getState() {
@@ -363,7 +369,7 @@
     body[data-sidebar-state="mini"] .cic-nav-label { display: none; }
     body[data-sidebar-state="mini"] .cic-nav-item  { padding: 11px; justify-content: center; }
 
-    /* ── Footer ── */
+    /* ── Sidebar footer ── */
     #cic-sidebar-footer {
       padding: 10px 14px 14px;
       border-top: 1px solid var(--cic-line-soft);
@@ -435,8 +441,68 @@
         ${NAV.map(buildSection).join('')}
       </nav>
       <div id="cic-sidebar-footer">
-        test-uk-aq.ukaq.co.uk·v0.2.2026.07
+        test-uk-aq.ukaq.co.uk·${SITE_VERSION}
       </div>`;
+  }
+
+  function buildSiteFooter() {
+    const oglUrl = 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/';
+    return `
+      <p class="ukaq-site-footer-meta">&copy; 2026 UK AQ · ${SITE_VERSION}</p>
+      <div class="ukaq-site-footer-sources" aria-label="Air quality data sources and licences">
+        <section class="ukaq-site-footer-source" aria-label="GOV.UK and UK-AIR attribution">
+          <div class="ukaq-site-footer-mark">
+            <a class="ukaq-site-footer-gov-pill" href="https://uk-air.defra.gov.uk/">GOV.UK AURN</a>
+          </div>
+          <p class="ukaq-site-footer-copy">&copy; Crown 2026 copyright Defra via <a href="https://uk-air.defra.gov.uk/">uk-air.defra.gov.uk</a>, licenced under the <a href="${oglUrl}">Open Government Licence (OGL)</a>.</p>
+        </section>
+
+        <section class="ukaq-site-footer-source" aria-label="Breathe London attribution">
+          <div class="ukaq-site-footer-mark">
+            <a href="https://www.breathelondon.org/" aria-label="Breathe London">
+              <img class="ukaq-site-footer-logo ukaq-site-footer-logo--breathe" src="${location.origin}/sidebar-images/breathelondon_logo_v2.svg" alt="Breathe London">
+            </a>
+          </div>
+          <p class="ukaq-site-footer-copy">Contains Breathe London data licensed under the <a href="${oglUrl}">Open Government License v3.0</a></p>
+          <p class="ukaq-site-footer-copy">Powered by <a href="https://www.breathelondon-communities.org/">Breathe London Communities</a></p>
+        </section>
+
+        <section class="ukaq-site-footer-source" aria-label="OpenAQ attribution">
+          <div class="ukaq-site-footer-mark">
+            <a href="https://openaq.org/" aria-label="OpenAQ">
+              <img class="ukaq-site-footer-logo ukaq-site-footer-logo--openaq" src="${location.origin}/sidebar-images/openaq_logo.svg" alt="OpenAQ">
+            </a>
+          </div>
+          <p class="ukaq-site-footer-copy">Air quality data via <a href="https://openaq.org/">OpenAQ</a></p>
+        </section>
+
+        <section class="ukaq-site-footer-source" aria-label="Sensor.Community attribution">
+          <div class="ukaq-site-footer-mark">
+            <a href="https://sensor.community/" aria-label="Sensor.Community">
+              <img class="ukaq-site-footer-logo ukaq-site-footer-logo--scomm" src="${location.origin}/sidebar-images/scomm_logo_text.svg" alt="Sensor.Community">
+            </a>
+          </div>
+          <p class="ukaq-site-footer-copy"><a href="https://sensor.community/">Sensor.Community</a>, made available under the <a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License (ODbL)</a>.</p>
+        </section>
+      </div>`;
+  }
+
+  function mountSiteFooter() {
+    if (document.getElementById('ukaq-site-footer')) return;
+
+    const oldHomeFooter = document.querySelector('.home-footer');
+    if (oldHomeFooter) oldHomeFooter.remove();
+
+    const footer = document.createElement('footer');
+    footer.id = 'ukaq-site-footer';
+    footer.setAttribute('aria-label', 'UK AQ site information and data licences');
+    footer.innerHTML = buildSiteFooter();
+
+    if (isSensorMapPage()) {
+      document.body.classList.add('ukaq-site-footer-after-viewport');
+    }
+
+    document.body.appendChild(footer);
   }
 
   // ─── Mount ────────────────────────────────────────────────────────────────────
@@ -450,7 +516,16 @@
       document.head.appendChild(link);
     }
 
-    // Injected styles
+    // Permanent shared footer styles
+    if (!document.getElementById('ukaq-site-footer-styles')) {
+      const link = document.createElement('link');
+      link.id = 'ukaq-site-footer-styles';
+      link.rel = 'stylesheet';
+      link.href = `${location.origin}/site-footer.css`;
+      document.head.appendChild(link);
+    }
+
+    // Injected sidebar styles
     const style = document.createElement('style');
     style.id = 'cic-sidebar-styles';
     style.textContent = CSS;
@@ -496,7 +571,9 @@
       document.body.prepend(aside);
     }
 
-    // Initial state — suppress the body transition so the padding-left jump
+    mountSiteFooter();
+
+    // Initial state: suppress the body transition so the padding-left jump
     // doesn't cause a mid-flight layout shift before the hex map first renders.
     document.body.style.transition = 'none';
     const bp = getBreakpoint();
@@ -506,7 +583,7 @@
     } else {
       setState(MINI);
     }
-    document.body.offsetHeight; // force reflow, then restore CSS transition
+    document.body.offsetHeight;
     document.body.style.transition = '';
     updateHamburgerIcon(btn);
 
