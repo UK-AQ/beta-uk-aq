@@ -109,8 +109,6 @@
 
   function setState(state) {
     document.body.setAttribute('data-sidebar-state', state);
-    const overlay = document.getElementById('cic-sidebar-overlay');
-    if (overlay) overlay.classList.toggle('visible', state === DRAWER);
   }
 
   function scheduleAutoCollapse() {
@@ -201,10 +199,14 @@
       background: rgba(16,24,34,0.35);
       z-index: 10009;
       opacity: 0;
+      pointer-events: none;
       transition: opacity var(--cic-ease);
     }
-    #cic-sidebar-overlay.visible        { display: block; }
-    body.cic-drawer-open #cic-sidebar-overlay { opacity: 1; }
+    body[data-sidebar-state="drawer"].cic-drawer-open #cic-sidebar-overlay {
+      display: block;
+      opacity: 1;
+      pointer-events: auto;
+    }
 
     /* ── Hamburger button ── */
     #cic-hamburger {
@@ -219,6 +221,9 @@
       border-radius: 25%;
       overflow: hidden;
       transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    @media (max-width: 767px) {
+      #cic-hamburger { position: absolute; }
     }
     #cic-hamburger:hover {
       transform: translateY(-1px);
@@ -244,6 +249,20 @@
     #ukaq-home-logo img {
       width: 104px; height: 104px;
       object-fit: contain; display: block;
+    }
+    #ukaq-home-logo picture { display: block; }
+    @media (max-width: 767px) {
+      #ukaq-home-logo {
+        top: 16px;
+        right: 16px;
+      }
+      #ukaq-home-logo img {
+        width: 112px;
+        height: auto;
+      }
+    }
+    @media (min-width: 768px) {
+      body.home-page #ukaq-home-logo { display: none; }
     }
 
     /* ── Nav ── */
@@ -383,21 +402,10 @@
   `;
 
   // ─── HTML builders ────────────────────────────────────────────────────────────
-  const UK_AQ_ROOT_HOSTS = new Set([
-    'beta.ukaq.co.uk',
-  ]);
-
-  function resolveHref(href) {
-    if (href === '#' || typeof href !== 'string') return href;
-    if (!href.startsWith('/uk-aq/')) return href;
-    const host = (location.hostname || '').toLowerCase();
-    return UK_AQ_ROOT_HOSTS.has(host) ? href.replace(/^\/uk-aq/, '') : href;
-  }
-
   function buildNavItem(item) {
     const path = location.pathname;
     const pathWithSearch = location.pathname + location.search;
-    const href = resolveHref(item.href);
+    const href = item.href;
     const isActive = href !== '#' && (
       href === '/' || href === '/index.html'
         ? isHomePage()
@@ -547,15 +555,16 @@
     btn.setAttribute('aria-label', 'Toggle navigation');
     btn.innerHTML = `<img src="${location.origin}${SIDEBAR_ICON_OFF}" alt="Menu">`;
 
-    // Top-right home logo (hidden on homepage)
-    const homeLogo = isHomePage() ? null : (() => {
-      const el = document.createElement('a');
-      el.id = 'ukaq-home-logo';
-      el.href = '/';
-      el.setAttribute('aria-label', 'UK AQ home');
-      el.innerHTML = `<img src="${location.origin}/sidebar-images/UK-AQ-Logo-v3-2Lines.svg" alt="UKAQ">`;
-      return el;
-    })();
+    // Shared top-right UK AQ home logo
+    const homeLogo = document.createElement('a');
+    homeLogo.id = 'ukaq-home-logo';
+    homeLogo.href = '/';
+    homeLogo.setAttribute('aria-label', 'UK AQ home');
+    homeLogo.innerHTML = `
+      <picture>
+        <source media="(max-width: 767px)" srcset="${location.origin}/images/UK-AQ-Logo-v3-1line.svg">
+        <img src="${location.origin}/sidebar-images/UK-AQ-Logo-v3-2Lines.svg" alt="UK AQ">
+      </picture>`;
 
     // Mount into placeholder or body
     const mountEl = document.getElementById('cic-sidebar-mount');
@@ -563,9 +572,9 @@
       mountEl.appendChild(aside);
       mountEl.appendChild(overlay);
       mountEl.appendChild(btn);
-      if (homeLogo) mountEl.appendChild(homeLogo);
+      mountEl.appendChild(homeLogo);
     } else {
-      if (homeLogo) document.body.prepend(homeLogo);
+      document.body.prepend(homeLogo);
       document.body.prepend(btn);
       document.body.prepend(overlay);
       document.body.prepend(aside);
@@ -630,7 +639,7 @@
       clearTimeout(autoCollapseTimer);
     });
 
-    // Resume auto-collapse on mouse leave (non-home pages)
+    // Resume auto-collapse on mouse leave
     document.getElementById('cic-sidebar').addEventListener('mouseleave', () => {
       if (!pinnedOpenDesktop && getBreakpoint() === 'desktop' && getState() === EXPANDED) {
         scheduleAutoCollapse();

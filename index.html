@@ -1759,6 +1759,7 @@
     }
   </style>
   <link rel="stylesheet" href="/beta-notice.css">
+  <link rel="stylesheet" href="/mobile.css" media="(max-width: 767px)">
 </head>
 <body class="home-page">
   <div id="cic-sidebar-mount"></div>
@@ -2404,7 +2405,7 @@
   </script>
   <script>
     (() => {
-      const WHO_SUMMARY_PATH = "/history/v2/who_2021/latest_who_2021.json";
+      const WHO_SUMMARY_PATH = "/api/aq/who-summary";
       const WHO_CACHE_KEY = "uk_aq_who_2021_homepage_summary_v1";
       const card = document.querySelector(".who-dashboard-card");
       if (!card) return;
@@ -2433,6 +2434,22 @@
 
       function latestExpectedCompleteDay() {
         return addDays(isoDay(new Date()), -1);
+      }
+
+      function isValidIsoDay(day) {
+        const value = String(day || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+        const parsed = new Date(`${value}T00:00:00.000Z`);
+        return Number.isFinite(parsed.getTime()) && isoDay(parsed) === value;
+      }
+
+      function isUsableWhoPayload(payload) {
+        return Boolean(
+          payload &&
+          typeof payload === "object" &&
+          isValidIsoDay(payload.data_as_of_day_utc) &&
+          Array.isArray(payload.cards)
+        );
       }
 
       function formatDisplayDay(day) {
@@ -2538,13 +2555,16 @@
       function readCachedWhoSummary() {
         try {
           const parsed = JSON.parse(localStorage.getItem(WHO_CACHE_KEY) || "null");
-          return parsed && typeof parsed === "object" ? parsed : null;
+          return parsed && typeof parsed === "object" && isUsableWhoPayload(parsed.payload)
+            ? parsed
+            : null;
         } catch (_) {
           return null;
         }
       }
 
       function writeCachedWhoSummary(payload) {
+        if (!isUsableWhoPayload(payload)) return;
         try {
           localStorage.setItem(WHO_CACHE_KEY, JSON.stringify({
             cached_at_utc: new Date().toISOString(),
@@ -2568,14 +2588,33 @@
         try {
           const response = await fetch(url.toString(), {
             headers: { Accept: "application/json" },
-            cache: "default",
+            cache: "no-store",
           });
+          const originCacheState = String(
+            response.headers.get("X-UK-AQ-WHO-Origin-Cache") || ""
+          ).trim();
           if (!response.ok) {
             throw new Error(`WHO summary request failed (${response.status})`);
           }
           const payload = await response.json();
-          if (!renderWhoSummary(payload)) {
+          if (!isUsableWhoPayload(payload)) {
             throw new Error("WHO summary payload missing cards");
+          }
+          if (
+            cachedPayload &&
+            (
+              cachedPayload.data_as_of_day_utc > payload.data_as_of_day_utc ||
+              (
+                originCacheState === "STALE_R2_ERROR" &&
+                cachedPayload.data_as_of_day_utc >= payload.data_as_of_day_utc
+              )
+            )
+          ) {
+            setWhoStatus("");
+            return;
+          }
+          if (!renderWhoSummary(payload)) {
+            throw new Error("WHO summary payload could not be rendered");
           }
           writeCachedWhoSummary(payload);
           setWhoStatus("");
