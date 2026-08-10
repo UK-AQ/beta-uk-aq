@@ -1775,7 +1775,7 @@
 
   <main class="home-main">
     <div class="ukaq-beta-notice-mount" data-ukaq-beta-notice-mount></div>
-    <section class="who-dashboard-card" aria-labelledby="who-guideline-title">
+    <section class="who-dashboard-card who-bars-pending" aria-labelledby="who-guideline-title">
       <div class="who-card-header">
         <div class="who-title-group">
           <h2 class="who-title" id="who-guideline-title">WHO guideline summary</h2>
@@ -2415,6 +2415,29 @@
       const rowByKey = new Map(
         Array.from(card.querySelectorAll("[data-who-row]")).map((row) => [row.dataset.whoRow, row])
       );
+      const barTracks = Array.from(card.querySelectorAll("[data-who-bar]"));
+
+      function syncWhoBarGradientWidth(track) {
+        const barFill = track.querySelector("[data-who-bar-fill]");
+        const trackWidth = track.getBoundingClientRect().width;
+        if (barFill && trackWidth > 0) {
+          barFill.style.setProperty("--who-track-width", `${trackWidth}px`);
+        }
+      }
+
+      function syncWhoBarGradientWidths() {
+        barTracks.forEach(syncWhoBarGradientWidth);
+      }
+
+      syncWhoBarGradientWidths();
+      if (typeof ResizeObserver === "function") {
+        const barResizeObserver = new ResizeObserver((entries) => {
+          entries.forEach((entry) => syncWhoBarGradientWidth(entry.target));
+        });
+        barTracks.forEach((track) => barResizeObserver.observe(track));
+      } else {
+        window.addEventListener("resize", syncWhoBarGradientWidths, { passive: true });
+      }
 
       function setWhoStatus(message) {
         if (!statusEl) return;
@@ -2577,6 +2600,38 @@
         }
       }
 
+      function startWhoBarReveal() {
+        const firstBarFill = card.querySelector("[data-who-bar-fill]");
+        let cleanupTimer = 0;
+        const finishReveal = () => {
+          if (cleanupTimer) window.clearTimeout(cleanupTimer);
+          card.classList.remove("who-bars-pending", "who-bars-revealing");
+        };
+        if (!firstBarFill) {
+          finishReveal();
+          return;
+        }
+        if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+          finishReveal();
+          return;
+        }
+
+        firstBarFill.addEventListener("transitionend", (event) => {
+          if (event.target === firstBarFill && event.propertyName === "width") {
+            finishReveal();
+          }
+        }, { once: true });
+
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            syncWhoBarGradientWidths();
+            card.classList.remove("who-bars-pending");
+            card.classList.add("who-bars-revealing");
+            cleanupTimer = window.setTimeout(finishReveal, 1200);
+          });
+        });
+      }
+
       async function loadWhoSummary() {
         const cached = readCachedWhoSummary();
         const cachedPayload = cached?.payload || null;
@@ -2626,6 +2681,7 @@
       }
 
       loadWhoSummary();
+      startWhoBarReveal();
     })();
   </script>
   <script>

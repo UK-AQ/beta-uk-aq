@@ -191,14 +191,21 @@
   }
 
   function renderObservedDateTime(container, row) {
+    if (!container) return "";
+
+    let time = container.querySelector("time");
+    if (!time) {
+      time = document.createElement("time");
+      container.replaceChildren(document.createTextNode("Observed "), time);
+    }
+
     const formatted = formatObservedDateTime(observedTimestampValue(row));
     if (!formatted) {
       container.hidden = true;
-      container.querySelector("time").removeAttribute("datetime");
-      container.querySelector("time").textContent = "";
+      time.removeAttribute("datetime");
+      time.textContent = "";
       return "";
     }
-    const time = container.querySelector("time");
     const zone = document.createElement("span");
     zone.className = "pollutant-observed-zone";
     zone.textContent = formatted.zone;
@@ -224,6 +231,24 @@
   function networkLabel(row) {
     return row?.network_label || row?.station?.network_label
       || networkLabels.get(networkCode(row)) || "Unknown network";
+  }
+
+  function renderNetworkSummaryLabel(container, label) {
+    const original = String(label || "").trim();
+    const parts = original.split(".").map((part) => part.trim()).filter(Boolean);
+    if (parts.length <= 1) {
+      container.textContent = original;
+      container.removeAttribute("aria-label");
+      return;
+    }
+
+    const nodes = [];
+    parts.forEach((part, index) => {
+      if (index > 0) nodes.push(document.createElement("br"));
+      nodes.push(document.createTextNode(part));
+    });
+    container.replaceChildren(...nodes);
+    container.setAttribute("aria-label", original);
   }
 
   function formatValue(value) {
@@ -489,7 +514,7 @@
       rowEl.dataset.network = code;
       const heading = document.createElement("th");
       heading.scope = "row";
-      heading.textContent = label;
+      renderNetworkSummaryLabel(heading, label);
       rowEl.append(heading, document.createElement("td"));
       POLLUTANTS.forEach(() => rowEl.append(document.createElement("td")));
       let newest = null;
