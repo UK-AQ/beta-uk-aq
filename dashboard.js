@@ -1,16 +1,22 @@
 (() => {
   "use strict";
 
-  const POLLUTANTS = [
-    { key: "pm25", label: "PM2.5", html: "PM2.5" },
-    { key: "pm10", label: "PM10", html: "PM10" },
-    { key: "no2", label: "NO₂", html: "NO<sub>2</sub>" },
-  ];
+  const pollutantDomain = window.UkAqPollutants;
+  const networkCatalogClient = window.UkAqNetworkCatalog;
+  if (!pollutantDomain?.definitions || !networkCatalogClient?.load) {
+    throw new Error("UK AQ shared domain/data modules must load before the dashboard.");
+  }
+  const POLLUTANTS = pollutantDomain.definitions.map((definition) => ({
+    key: definition.key,
+    label: definition.typographicLabel,
+    html: definition.htmlLabel,
+  }));
   const FALLBACK_NETWORKS = [
     { code: "gov_uk_aurn", label: "GOV.UK AURN" },
     { code: "breathelondon", label: "Breathe London" },
     { code: "sensorcommunity", label: "Sensor.Community" },
   ];
+  const PREFERRED_INITIAL_NETWORK_CODES = new Set(["gov_uk_aurn", "breathelondon"]);
   const DASHBOARD_ACTIVE_WINDOW_HOURS = 6;
   const DASHBOARD_ACTIVE_WINDOW = `${DASHBOARD_ACTIVE_WINDOW_HOURS}h`;
   const DASHBOARD_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -20,6 +26,7 @@
   const networkLabels = new Map(FALLBACK_NETWORKS.map(({ code, label }) => [code, label]));
   const areaNames = { pcon: new Map(), la: new Map() };
   const dashboard = document.querySelector(".readings-dashboard");
+  const areaReadingsTable = document.querySelector(".dashboard-table--areas");
   const networkPicker = document.getElementById("home-network-picker");
   const networkPickerButton = document.getElementById("network-picker-button");
   const networkPickerButtonText = document.getElementById("network-picker-button-text");
@@ -50,6 +57,13 @@
   let dashboardRefreshTimeout = null;
   let fitValuesFrame = null;
   let fitValuesTimer = null;
+  let areaLayoutFrame = null;
+  let lastAreaTableObservedWidth = null;
+
+  if (networkPickerClearAll) {
+    networkPickerClearAll.setAttribute("aria-label", "Keep one network selected");
+    networkPickerClearAll.title = "Keep one network selected";
+  }
 
   function parseBooleanFlag(value) {
     return /^(1|true|yes|on)$/i.test(String(value || "").trim());
@@ -108,17 +122,17 @@
   }
 
   async function fetchNetworkCatalog() {
-    const response = await fetchCacheApi(`${cacheBaseUrl}/networks`, { credentials: "include" });
-    if (!response.ok) throw new Error(`Network catalog request failed: ${response.status}`);
-    const payload = await response.json();
-    return (Array.isArray(payload?.data) ? payload.data : [])
-      .filter((row) => row?.public_display_enabled === true)
-      .map((row) => ({
-        code: String(row.network_code || "").trim(),
-        label: String(row.network_label || "").trim(),
-        type: row.network_type || null,
-      }))
-      .filter((row) => row.code && row.label);
+    const rows = await networkCatalogClient.load({
+      url: `${cacheBaseUrl}/networks`,
+      fetchApi: fetchCacheApi,
+      init: { credentials: "include" },
+      requirePublicDisplayEnabled: true,
+    });
+    return rows.map((row) => ({
+      code: row.code,
+      label: row.label,
+      type: row.network_type,
+    }));
   }
 
   async function fetchAreaNames() {
@@ -326,6 +340,355 @@
     });
   }
 
+  function ensureAreaGroupRows() {
+    const body = areaReadingsTable?.tBodies?.[0];
+    if (!body) return;
+
+    ["pcon", "la"].forEach((type) => {
+      const dataRow = body.querySelector(`tr[data-area-type="${type}"]`);
+      if (!dataRow || body.querySelector(`tr[data-area-group="${type}"]`)) return;
+      const label = dataRow.cells[0]?.textContent?.trim();
+      if (!label) return;
+
+      const groupRow = document.createElement("tr");
+      groupRow.className = "area-reading-group-row";
+      groupRow.dataset.areaGroup = type;
+      const heading = document.createElement("th");
+      heading.colSpan = areaReadingsTable.tHead?.rows?.[0]?.cells?.length || 4;
+      heading.textContent = label;
+      groupRow.append(heading);
+      body.insertBefore(groupRow, dataRow);
+    });
+  }
+
+  function contentBoxWidth(element) {
+    if (!element || element.clientWidth <= 0) return 0;
+    const styles = window.getComputedStyle(element);
+    const paddingLeft = Number.parseFloat(styles.paddingLeft) || 0;
+    const paddingRight = Number.parseFloat(styles.paddingRight) || 0;
+    return Math.max(0, element.clientWidth - paddingLeft - paddingRight);
+  }
+
+  function renderedContentWidth(element) {
+    if (!element || !element.textContent.trim()) return 0;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const width = range.getBoundingClientRect().width;
+    range.detach?.();
+    return width;
+  }
+
+  function longestUnbrokenWordWidth(element) {
+    if (!element || !element.textContent.trim()) return 0;
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let longestWidth = 0;
+    let textNode = walker.nextNode();
+
+    while (textNode) {
+      const text = textNode.textContent || "";
+      const words = text.matchAll(/\S+(?:\u00a0\S+)*/g);
+      for (const word of words) {
+        range.setStart(textNode, word.index);
+        range.setEnd(textNode, word.index + word[0].length);
+        longestWidth = Math.max(longestWidth, range.getBoundingClientRect().width);
+      }
+      textNode = walker.nextNode();
+    }
+
+    range.detach?.();
+    return longestWidth;
+  }
+
+  function longestWordFits(element, availableWidth = contentBoxWidth(element)) {
+    if (!element || availableWidth <= 0) return true;
+    return longestUnbrokenWordWidth(element) <= availableWidth + 1;
+  }
+
+  function pollutantCellContentWidth(element) {
+    return contentBoxWidth(element?.closest("td"));
+  }
+
+  function resetAreaReadingNameFit(nameEl) {
+    if (!nameEl) return;
+    nameEl.textContent = preferredAreaNameDisplay(nameEl.textContent);
+    nameEl.classList.remove(
+      "area-reading-name--fit-90",
+      "area-reading-name--fit-85",
+      "area-reading-name--fit-80",
+      "area-reading-name--emergency-wrap",
+    );
+  }
+
+  function fitAreaReadingName(nameEl) {
+    resetAreaReadingNameFit(nameEl);
+    if (!nameEl.textContent.trim() || nameEl.clientWidth <= 0 || longestWordFits(nameEl)) return;
+
+    nameEl.classList.add("area-reading-name--fit-90");
+    if (longestWordFits(nameEl)) return;
+
+    nameEl.classList.remove("area-reading-name--fit-90");
+    nameEl.classList.add("area-reading-name--fit-85");
+    if (longestWordFits(nameEl)) return;
+
+    nameEl.classList.remove("area-reading-name--fit-85");
+    nameEl.classList.add("area-reading-name--fit-80");
+    if (longestWordFits(nameEl)) return;
+
+    nameEl.textContent = nameEl.textContent.replace(/\band\u00a0(?=\S)/gi, (match) => (
+      `${match.slice(0, -1)} `
+    ));
+    if (!longestWordFits(nameEl)) nameEl.classList.add("area-reading-name--emergency-wrap");
+  }
+
+  const groupedAreaNameHeightProperty = "--area-reading-name-row-height";
+
+  function resetGroupedAreaNameHeights() {
+    areaReadingsTable.querySelectorAll("tbody tr[data-area-type]").forEach((row) => {
+      row.style.removeProperty(groupedAreaNameHeightProperty);
+    });
+  }
+
+  function syncGroupedAreaNameHeights() {
+    if (!areaReadingsTable.classList.contains("area-table--grouped")) return;
+
+    areaReadingsTable.querySelectorAll("tbody tr[data-area-type]").forEach((row) => {
+      if (row.getClientRects().length === 0) return;
+      const names = Array.from(row.querySelectorAll(".area-reading-name"));
+      const maxHeight = Math.max(
+        0,
+        ...names.map((name) => name.getBoundingClientRect().height),
+      );
+      if (maxHeight > 0) {
+        row.style.setProperty(groupedAreaNameHeightProperty, `${maxHeight}px`);
+      }
+    });
+  }
+
+  function metricLineWidth(metricEl) {
+    if (!metricEl) return 0;
+    const markerEl = metricEl.querySelector(".area-marker");
+    const valueEl = metricEl.querySelector(".area-reading-value");
+    if (!markerEl || !valueEl) return 0;
+
+    const styles = window.getComputedStyle(metricEl);
+    const gap = Number.parseFloat(styles.columnGap || styles.gap) || 0;
+    const valueWidth = Math.max(
+      renderedContentWidth(valueEl),
+      valueEl.getBoundingClientRect().width,
+    );
+    return markerEl.getBoundingClientRect().width + gap + valueWidth;
+  }
+
+  function metricLineFits(metricEl, availableWidth = pollutantCellContentWidth(metricEl)) {
+    if (!metricEl) return true;
+    if (availableWidth <= 0) return true;
+    return metricLineWidth(metricEl) <= availableWidth + 1;
+  }
+
+  const groupedMetricFitClasses = [
+    "area-table--compact",
+    "area-table--metric-split",
+    "area-table--metric-90",
+    "area-table--metric-85",
+    "area-table--metric-80",
+  ];
+
+  const groupedMetricScaleClasses = [
+    "area-table--metric-90",
+    "area-table--metric-85",
+    "area-table--metric-80",
+  ];
+
+  function resetGroupedMetricFit() {
+    areaReadingsTable.classList.remove(...groupedMetricFitClasses);
+  }
+
+  function groupedMetricLinesFit() {
+    const metrics = areaReadingsTable.querySelectorAll(
+      "tbody tr[data-area-type] .area-reading-metric",
+    );
+    return metrics.length > 0 && Array.from(metrics).every((metric) => {
+      const availableWidth = pollutantCellContentWidth(metric);
+      return availableWidth > 0 && metricLineFits(metric, availableWidth);
+    });
+  }
+
+  function elementFitsPollutantCell(element, availableWidth) {
+    const cell = element?.closest("td");
+    if (!cell || availableWidth <= 0) return false;
+
+    const cellRect = cell.getBoundingClientRect();
+    const styles = window.getComputedStyle(cell);
+    const contentLeft = cellRect.left
+      + (Number.parseFloat(styles.borderLeftWidth) || 0)
+      + (Number.parseFloat(styles.paddingLeft) || 0);
+    const contentRight = contentLeft + availableWidth;
+    const rect = element.getBoundingClientRect();
+
+    return rect.left >= contentLeft - 1 && rect.right <= contentRight + 1;
+  }
+
+  function splitMetricFits(metric) {
+    const markerEl = metric?.querySelector(".area-marker");
+    const numberEl = metric?.querySelector(".area-reading-number");
+    const unitEl = metric?.querySelector(".area-reading-unit");
+    if (!markerEl || !numberEl || !unitEl) return false;
+
+    const availableWidth = pollutantCellContentWidth(metric);
+    if (availableWidth <= 0) return false;
+
+    const styles = window.getComputedStyle(metric);
+    const gap = Number.parseFloat(styles.columnGap || styles.gap) || 0;
+    const markerWidth = markerEl.getBoundingClientRect().width;
+    const numberWidth = renderedContentWidth(numberEl);
+    const unitWidth = unitEl.hidden ? 0 : renderedContentWidth(unitEl);
+    const valueTrackWidth = availableWidth - markerWidth - gap;
+    const renderedElements = [metric, markerEl, numberEl];
+    if (!unitEl.hidden) renderedElements.push(unitEl);
+
+    return markerWidth + gap + numberWidth <= availableWidth + 1
+      && unitWidth <= valueTrackWidth + 1
+      && renderedElements.every((element) => (
+        elementFitsPollutantCell(element, availableWidth)
+      ));
+  }
+
+  function groupedSplitMetricsFit() {
+    const metrics = areaReadingsTable.querySelectorAll(
+      "tbody tr[data-area-type] .area-reading-metric",
+    );
+    return metrics.length > 0 && Array.from(metrics).every(splitMetricFits);
+  }
+
+  function resolveGroupedMetricFit() {
+    resetGroupedMetricFit();
+    if (groupedMetricLinesFit()) return;
+
+    areaReadingsTable.classList.add("area-table--compact");
+    if (groupedMetricLinesFit()) return;
+
+    areaReadingsTable.classList.add("area-table--metric-split");
+    if (groupedSplitMetricsFit()) return;
+
+    // Keep the split presentation while scaling. Each scale replaces the
+    // previous one; 80% is reached only when the measured 90% and 85%
+    // presentations both remain too wide.
+    for (const fitClass of groupedMetricScaleClasses) {
+      areaReadingsTable.classList.remove(...groupedMetricScaleClasses);
+      areaReadingsTable.classList.add(fitClass);
+      if (groupedSplitMetricsFit()) return;
+    }
+  }
+
+  function readingContentFitsCell(reading) {
+    const cell = reading?.closest("td");
+    if (!cell || cell.clientWidth <= 0) return true;
+
+    const cellStyles = window.getComputedStyle(cell);
+    const cellRect = cell.getBoundingClientRect();
+    const contentLeft = cellRect.left
+      + (Number.parseFloat(cellStyles.borderLeftWidth) || 0)
+      + (Number.parseFloat(cellStyles.paddingLeft) || 0);
+    const contentRight = cellRect.right
+      - (Number.parseFloat(cellStyles.borderRightWidth) || 0)
+      - (Number.parseFloat(cellStyles.paddingRight) || 0);
+    const contentElements = reading.querySelectorAll(
+      ".area-reading-name, .area-reading-metric",
+    );
+
+    return Array.from(contentElements).every((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left >= contentLeft - 1 && rect.right <= contentRight + 1;
+    });
+  }
+
+  function sideBySideAreaReadingsFit() {
+    const readings = areaReadingsTable.querySelectorAll(
+      "tbody tr[data-area-type] .area-reading",
+    );
+    return Array.from(readings).every((reading) => {
+      const nameEl = reading.querySelector(".area-reading-name");
+      const metricEl = reading.querySelector(".area-reading-metric");
+      const availableWidth = pollutantCellContentWidth(reading);
+      if (!nameEl || !metricEl || availableWidth <= 0) return true;
+
+      const styles = window.getComputedStyle(reading);
+      const gap = Number.parseFloat(styles.columnGap || styles.gap) || 0;
+      const metricTrackWidth = Math.max(
+        metricEl.getBoundingClientRect().width,
+        metricLineWidth(metricEl),
+      );
+      const requiredWidth = longestUnbrokenWordWidth(nameEl) + gap + metricTrackWidth;
+      return requiredWidth <= availableWidth + 1
+        && metricLineFits(metricEl, availableWidth)
+        && readingContentFitsCell(reading);
+    });
+  }
+
+  function standardAreaTableFits() {
+    const areaTypeCells = areaReadingsTable.querySelectorAll(
+      'tbody tr[data-area-type] > th:first-child',
+    );
+    const names = areaReadingsTable.querySelectorAll(
+      "tbody tr[data-area-type] .area-reading-name",
+    );
+    const metrics = areaReadingsTable.querySelectorAll(
+      "tbody tr[data-area-type] .area-reading-metric",
+    );
+    const readings = areaReadingsTable.querySelectorAll(
+      "tbody tr[data-area-type] .area-reading",
+    );
+    return Array.from(areaTypeCells).every((cell) => longestWordFits(cell))
+      && Array.from(names).every((name) => longestWordFits(
+        name,
+        pollutantCellContentWidth(name),
+      ))
+      && Array.from(metrics).every((metric) => metricLineFits(metric))
+      && Array.from(readings).every(readingContentFitsCell);
+  }
+
+  function resolveAreaReadingLayout() {
+    areaReadingsTable.classList.remove("area-table--stacked");
+    if (!sideBySideAreaReadingsFit()) {
+      areaReadingsTable.classList.add("area-table--stacked");
+    }
+  }
+
+  function applyAreaTableLayout() {
+    if (!areaReadingsTable) return;
+    ensureAreaGroupRows();
+
+    const names = areaReadingsTable.querySelectorAll(".area-reading-name");
+
+    // Restore normal three-row geometry and normal name sizing before every
+    // decision so widening can return the complete table to standard mode.
+    resetGroupedAreaNameHeights();
+    resetGroupedMetricFit();
+    areaReadingsTable.classList.remove(
+      "area-table--grouped",
+      "area-table--stacked",
+    );
+    names.forEach(resetAreaReadingNameFit);
+    resolveAreaReadingLayout();
+
+    if (!standardAreaTableFits()) {
+      areaReadingsTable.classList.add("area-table--grouped");
+      resolveAreaReadingLayout();
+      resolveGroupedMetricFit();
+      names.forEach(fitAreaReadingName);
+      syncGroupedAreaNameHeights();
+    }
+  }
+
+  function scheduleAreaTableLayout() {
+    if (areaLayoutFrame !== null) window.cancelAnimationFrame(areaLayoutFrame);
+    areaLayoutFrame = window.requestAnimationFrame(() => {
+      areaLayoutFrame = null;
+      applyAreaTableLayout();
+    });
+  }
+
   function formatDate(value) {
     if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "—";
     const parts = new Intl.DateTimeFormat("en-GB", {
@@ -482,6 +845,12 @@
     }));
   }
 
+  function preferredAreaNameDisplay(name) {
+    return String(name || "").replace(/\band[ \t\u00a0]+(?=\S)/gi, (match) => (
+      `${match.trim()}\u00a0`
+    ));
+  }
+
   function renderAreas() {
     ["pcon", "la"].forEach((type) => {
       const rowEl = document.querySelector(`[data-area-type="${type}"]`);
@@ -494,9 +863,14 @@
         const name = cell.querySelector(".area-reading-name");
         const marker = cell.querySelector(".area-marker");
         const value = cell.querySelector(".area-reading-value");
+        const number = value?.querySelector(".area-reading-number");
+        const unit = value?.querySelector(".area-reading-unit");
         const formattedValue = highest ? formatValue(highest.value) : null;
-        name.textContent = highest?.name || "No data";
-        value.innerHTML = highest ? `${formattedValue} &micro;g/m<sup>3</sup>` : "—";
+        name.textContent = highest ? preferredAreaNameDisplay(highest.name) : "No data";
+        if (number && unit) {
+          number.textContent = highest ? formattedValue : "—";
+          unit.hidden = !highest;
+        }
         marker.style.background = severityColour(highest?.value ?? null, pollutant.key);
         reading?.setAttribute("aria-label", highest
           ? `${pollutant.label} highest ${rowEl.cells[0].textContent} reading: ${highest.name}, ${formattedValue} micrograms per cubic metre.`
@@ -610,7 +984,11 @@
     const availableCodes = new Set(networkCatalog.map(({ code }) => code));
     if (!hasInitializedNetworkSelection) {
       selectedNetworks.clear();
-      networkCatalog.forEach(({ code }) => selectedNetworks.add(code));
+      const preferredNetworks = networkCatalog.filter(({ code }) =>
+        PREFERRED_INITIAL_NETWORK_CODES.has(code)
+      );
+      const initialNetworks = preferredNetworks.length ? preferredNetworks : networkCatalog;
+      initialNetworks.forEach(({ code }) => selectedNetworks.add(code));
       hasInitializedNetworkSelection = true;
       return;
     }
@@ -640,6 +1018,7 @@
     renderUpdated();
     renderNetworkPicker();
     schedulePollutantValueFit();
+    scheduleAreaTableLayout();
   }
 
   function setDashboardBusy(isBusy) {
@@ -769,6 +1148,16 @@
     scheduleNextDashboardRefresh();
   }
 
+  const areaTableWidthObserver = areaReadingsTable && typeof ResizeObserver === "function"
+    ? new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect?.width;
+      if (!Number.isFinite(width)) return;
+      if (lastAreaTableObservedWidth !== null && Math.abs(width - lastAreaTableObservedWidth) < 0.5) return;
+      lastAreaTableObservedWidth = width;
+      scheduleAreaTableLayout();
+    })
+    : null;
+
   networkPickerButton?.addEventListener("click", () => {
     setNetworkPickerOpen(networkPickerPanel.hidden);
   });
@@ -793,14 +1182,150 @@
   });
   window.addEventListener("resize", () => {
     window.clearTimeout(fitValuesTimer);
-    fitValuesTimer = window.setTimeout(schedulePollutantValueFit, 120);
+    fitValuesTimer = window.setTimeout(() => {
+      schedulePollutantValueFit();
+      scheduleAreaTableLayout();
+    }, 120);
   });
   refreshButton?.addEventListener("click", requestDashboardRefresh);
   document.addEventListener("visibilitychange", syncDashboardRefreshSchedule);
   window.addEventListener("focus", syncDashboardRefreshSchedule);
   window.addEventListener("blur", clearDashboardRefreshTimeout);
-  document.fonts?.ready?.then(schedulePollutantValueFit);
+  document.fonts?.ready?.then(() => {
+    schedulePollutantValueFit();
+    scheduleAreaTableLayout();
+  });
+  ensureAreaGroupRows();
+  areaTableWidthObserver?.observe(areaReadingsTable);
   applyDashboardWindowCopy();
+  scheduleAreaTableLayout();
   requestDashboardRefresh();
   scheduleNextDashboardRefresh();
+})();
+
+(function initWhoGuidelineReference() {
+  "use strict";
+
+  const footer = document.querySelector(".home-page .who-card-footer");
+  if (!footer || footer.querySelector(".who-guideline-reference-v2")) return;
+
+  const reference = document.createElement("div");
+  reference.className = "who-guideline-reference-v2";
+  reference.innerHTML = `
+    <div class="who-guideline-heading-v2">
+      <strong>World Health Organization guideline values <span class="who-guideline-unit-v2">(&micro;g/m<sup>3</sup>)</span></strong>
+      <button
+        type="button"
+        class="who-guideline-info-toggle-v2"
+        aria-expanded="false"
+        aria-controls="who-guideline-note-v2"
+        aria-label="Show note about WHO guideline values"
+      >
+        <img src="/images/Info-Icon-alpha.svg" alt="" aria-hidden="true">
+      </button>
+    </div>
+    <table class="who-guideline-table-v2">
+      <caption class="sr-only">World Health Organization air quality guideline values in micrograms per cubic metre</caption>
+      <thead>
+        <tr>
+          <th scope="col">Pollutant</th>
+          <th scope="col">Daily</th>
+          <th scope="col">Yearly</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">PM2.5</th>
+          <td>15</td>
+          <td>5</td>
+        </tr>
+        <tr>
+          <th scope="row">PM10</th>
+          <td>45</td>
+          <td>15</td>
+        </tr>
+        <tr>
+          <th scope="row">NO<sub>2</sub></th>
+          <td>25</td>
+          <td>10</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="who-guideline-note-v2" id="who-guideline-note-v2" role="note">
+      <strong>Note:</strong> Daily averages use GMT days from midnight to midnight. &ldquo;Above guideline&rdquo; means above WHO health-based guidelines, not UK legal limits.
+    </div>
+  `;
+
+  footer.replaceChildren(reference);
+
+  const heading = reference.querySelector(".who-guideline-heading-v2");
+  const toggle = reference.querySelector(".who-guideline-info-toggle-v2");
+  const note = reference.querySelector(".who-guideline-note-v2");
+  const mobileMedia = window.matchMedia("(max-width: 767px)");
+  let noteOpen = false;
+
+  function syncNoteTop() {
+    if (!heading) return;
+    reference.style.setProperty("--who-guideline-note-top", `${heading.offsetHeight + 6}px`);
+  }
+
+  function setNoteOpen(open) {
+    noteOpen = Boolean(open && mobileMedia.matches);
+    reference.classList.toggle("who-guideline-note-open-v2", noteOpen);
+    toggle.setAttribute("aria-expanded", String(noteOpen));
+    toggle.setAttribute(
+      "aria-label",
+      noteOpen ? "Hide note about WHO guideline values" : "Show note about WHO guideline values",
+    );
+    note.hidden = mobileMedia.matches ? !noteOpen : false;
+    if (noteOpen) syncNoteTop();
+  }
+
+  function closeNote() {
+    if (noteOpen) setNoteOpen(false);
+  }
+
+  function syncViewport() {
+    noteOpen = false;
+    reference.classList.remove("who-guideline-note-open-v2");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-label", "Show note about WHO guideline values");
+    note.hidden = mobileMedia.matches;
+    syncNoteTop();
+  }
+
+  toggle.addEventListener("click", () => {
+    setNoteOpen(!noteOpen);
+  });
+
+  document.addEventListener("pointerdown", (event) => {
+    if (!noteOpen) return;
+    if (toggle.contains(event.target) || note.contains(event.target)) return;
+    closeNote();
+  });
+
+  document.addEventListener("focusin", (event) => {
+    if (!noteOpen) return;
+    if (toggle.contains(event.target) || note.contains(event.target)) return;
+    closeNote();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeNote();
+  });
+
+  document.addEventListener("scroll", closeNote, { passive: true, capture: true });
+  window.addEventListener("resize", () => {
+    closeNote();
+    syncNoteTop();
+  }, { passive: true });
+  window.addEventListener("orientationchange", closeNote, { passive: true });
+  document.addEventListener("visibilitychange", closeNote);
+
+  syncViewport();
+  if (typeof mobileMedia.addEventListener === "function") {
+    mobileMedia.addEventListener("change", syncViewport);
+  } else {
+    mobileMedia.addListener?.(syncViewport);
+  }
 })();

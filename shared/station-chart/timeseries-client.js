@@ -1,8 +1,18 @@
-// timeseries-client.js
 // Shared request/response adapter for line-chart timeseries calls.
 // Chart rendering remains in chart-core.js and page-specific chart code.
-(function () {
+(function (root, factory) {
+  const pollutants = root.UkAqPollutants
+    || (typeof module === "object" && module.exports ? require("../domain/pollutants.js") : null);
+  const api = factory(pollutants);
+  if (typeof module === "object" && module.exports) module.exports = api;
+  root.UkAqTimeseriesClient = api;
+})(typeof globalThis !== "undefined" ? globalThis : this, function (pollutantDomain) {
+  "use strict";
   var CACHE_BUSTER_KEYS = new Set(["_t", "timestamp", "cache_bust", "random"]);
+
+  if (!pollutantDomain || typeof pollutantDomain.normalize !== "function") {
+    throw new Error("UK AQ pollutant domain must load before the timeseries client.");
+  }
 
   function normalizeIsoTimestamp(value) {
     if (!value) return null;
@@ -17,11 +27,7 @@
   }
 
   function normalizePollutantKey(value) {
-    var text = String(value || "").trim().toLowerCase().replace(/[\s._-]+/g, "");
-    if (text === "pm25" || text === "pm10" || text === "no2") {
-      return text;
-    }
-    return null;
+    return pollutantDomain.normalize(value);
   }
 
   function parseObservationNumericValue(rawValue) {
@@ -162,10 +168,10 @@
     return url;
   }
 
-  window.UkAqTimeseriesClient = {
+  return {
     buildCanonicalTimeseriesUrl: buildCanonicalTimeseriesUrl,
     parseObservationNumericValue: parseObservationNumericValue,
     parseTimeseriesPayloadPoints: parseTimeseriesPayloadPoints,
     normalizeTimeseriesMeta: normalizeTimeseriesMeta,
   };
-})();
+});

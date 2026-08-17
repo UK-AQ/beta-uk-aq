@@ -8,6 +8,14 @@
 }
 
 /* Make the WHO guideline heading read as a proper title on desktop and mobile. */
+.home-page .who-card-footer {
+  background: #fff;
+}
+
+.home-page .who-guideline-table-v2 thead th {
+  background: #edf6fd;
+}
+
 .home-page .who-guideline-heading-v2 strong {
   font-size: clamp(1.05rem, 1.3vw, 1.18rem);
   font-weight: 800;
@@ -100,6 +108,10 @@
 
 .home-page .pollutant-meta-cycle .pollutant-station {
   display: flex;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-align: center;
 }
 
 .home-page .pollutant-meta-cycle .pollutant-network {
@@ -857,18 +869,16 @@
   }
 }
 
-/* Highest-area table responsive modes are based on the card's usable width,
-   not the site-wide mobile breakpoint. The card content box matches the table
-   wrapper width, so one named container switches all pollutant cells together. */
-body.home-page .dashboard-table-card:has(.dashboard-table--areas) {
-  container-name: area-readings-table;
-  container-type: inline-size;
-}
-
 body.home-page .dashboard-table--areas {
   width: 100%;
   min-width: 0 !important;
   table-layout: fixed;
+  --area-group-border: #a9adb1;
+  --area-metric-marker-width: 1.17rem;
+  --area-metric-marker-height: 1.35rem;
+  --area-metric-gap: 0.35rem;
+  --area-metric-value-track: 6.4rem;
+  --area-metric-font-size: 100%;
 }
 
 body.home-page .dashboard-table--areas .dashboard-table-area-type-col {
@@ -879,12 +889,19 @@ body.home-page .dashboard-table--areas col:not(.dashboard-table-area-type-col) {
   width: 25.333333% !important;
 }
 
+body.home-page .dashboard-table--areas thead th:first-child,
+body.home-page .dashboard-table--areas tbody tr[data-area-type] > th:first-child {
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 /* Side-by-side mode: preserve fixed marker and value tracks so content length
    cannot move corresponding markers or value starts between area rows. */
 body.home-page .dashboard-table--areas .area-reading {
   display: grid;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 1.17rem 6.4rem;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 0.35rem;
   min-width: 0;
@@ -893,53 +910,277 @@ body.home-page .dashboard-table--areas .area-reading {
 body.home-page .dashboard-table--areas .area-reading-name {
   grid-column: 1;
   min-width: 0;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
 }
 
 body.home-page .dashboard-table--areas .area-reading-metric {
-  display: contents;
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: var(--area-metric-marker-width) var(--area-metric-value-track);
+  align-items: center;
+  justify-self: end;
+  column-gap: var(--area-metric-gap);
+  min-width: 0;
+  white-space: nowrap;
 }
 
 body.home-page .dashboard-table--areas .area-marker {
-  grid-column: 2;
+  grid-column: 1;
+  width: var(--area-metric-marker-width);
+  height: var(--area-metric-marker-height);
+  flex: 0 0 var(--area-metric-marker-width);
   justify-self: start;
 }
 
 body.home-page .dashboard-table--areas .area-reading-value {
-  grid-column: 3;
+  grid-column: 2;
+  display: inline-flex;
+  align-items: baseline;
   justify-self: start;
+  gap: 0.25em;
+  font-size: var(--area-metric-font-size);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-/* Stacked mode: at this width each pollutant column would otherwise leave less
-   than about 6rem for an area name after its fixed marker/value tracks. */
-@container area-readings-table (max-width: 1020px) {
-  body.home-page .dashboard-table--areas .area-reading {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 0.28rem;
-    column-gap: 0;
-  }
+body.home-page .dashboard-table--areas .area-reading-number,
+body.home-page .dashboard-table--areas .area-reading-unit {
+  white-space: nowrap;
+}
 
-  body.home-page .dashboard-table--areas .area-reading-name {
-    grid-column: 1;
-    grid-row: 1;
-  }
+/* The controller enables stacked mode only after rendered side-by-side content
+   no longer fits. All pollutant cells switch together. */
+body.home-page .dashboard-table--areas.area-table--stacked .area-reading {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 0.28rem;
+  column-gap: 0;
+}
 
-  body.home-page .dashboard-table--areas .area-reading-metric {
-    grid-column: 1;
-    grid-row: 2;
-    display: inline-flex;
-    width: max-content;
-    max-width: 100%;
-    align-items: center;
-    justify-self: start;
-    gap: 0.35rem;
-    white-space: nowrap;
-  }
+body.home-page .dashboard-table--areas.area-table--stacked .area-reading-name {
+  grid-column: 1;
+  grid-row: 1;
+}
 
-  body.home-page .dashboard-table--areas .area-marker,
-  body.home-page .dashboard-table--areas .area-reading-value {
-    grid-column: auto;
-    justify-self: auto;
-  }
+body.home-page .dashboard-table--areas.area-table--stacked .area-reading-metric {
+  grid-column: 1;
+  grid-row: 2;
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  justify-self: start;
+  gap: var(--area-metric-gap);
+  white-space: nowrap;
+}
+
+body.home-page .dashboard-table--areas.area-table--stacked .area-marker,
+body.home-page .dashboard-table--areas.area-table--stacked .area-reading-value {
+  grid-column: auto;
+  justify-self: auto;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped tbody tr[data-area-type] .area-reading {
+  align-items: start;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped tbody tr[data-area-type] .area-reading-name {
+  align-self: start;
+  min-height: var(--area-reading-name-row-height, 0);
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped tbody tr[data-area-type] .area-reading-metric {
+  align-self: end;
+}
+
+/* Grouped narrow-fit stages are applied only after normal grouped layout has
+   been measured. Spacing is reduced before the shared metric presentation. */
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--compact {
+  --area-metric-gap: 0.22rem;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--compact tbody tr[data-area-type] > td {
+  padding-inline: 0.38rem;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-split .area-reading-metric {
+  display: grid;
+  grid-template-columns: var(--area-metric-marker-width) max-content;
+  grid-template-rows: auto;
+  align-items: start;
+  justify-self: start;
+  column-gap: var(--area-metric-gap);
+  row-gap: 0;
+  width: max-content;
+  max-width: 100%;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-split .area-marker {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-split .area-reading-value {
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: max-content;
+  grid-template-rows: auto auto;
+  align-items: start;
+  justify-self: start;
+  gap: 0;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-split .area-reading-number {
+  grid-row: 1;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-split .area-reading-unit {
+  grid-row: 2;
+  font-size: 78%;
+  line-height: 1.05;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-90 {
+  --area-metric-marker-width: 1.053rem;
+  --area-metric-marker-height: 1.215rem;
+  --area-metric-gap: 0.198rem;
+  --area-metric-value-track: 5.76rem;
+  --area-metric-font-size: 90%;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-85 {
+  --area-metric-marker-width: 0.995rem;
+  --area-metric-marker-height: 1.148rem;
+  --area-metric-gap: 0.187rem;
+  --area-metric-value-track: 5.44rem;
+  --area-metric-font-size: 85%;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped.area-table--metric-80 {
+  --area-metric-marker-width: 0.936rem;
+  --area-metric-marker-height: 1.08rem;
+  --area-metric-gap: 0.176rem;
+  --area-metric-value-track: 5.12rem;
+  --area-metric-font-size: 80%;
+}
+
+/* Grouped five-row fallback. JavaScript enables this when any area-type word,
+   normal-size area-name word, or complete marker/value-unit line cannot fit in
+   the resolved standard layout. */
+body.home-page .dashboard-table--areas .area-reading-group-row {
+  display: none;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped .dashboard-table-area-type-col {
+  width: 0 !important;
+  visibility: collapse;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped col:not(.dashboard-table-area-type-col) {
+  width: 33.333333% !important;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped thead th:first-child,
+body.home-page .dashboard-table--areas.area-table--grouped tbody tr[data-area-type] > th:first-child {
+  display: table-cell !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 0 !important;
+  visibility: hidden;
+  font-size: 0;
+  line-height: 0;
+  white-space: nowrap;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped thead th {
+  border-radius: 0;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped thead th:nth-child(2) {
+  border-left: 0 !important;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped .area-reading-group-row {
+  display: table-row;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped .area-reading-group-row > th {
+  display: table-cell;
+  padding: 0.55rem 0.65rem;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 1px solid #ded2c4;
+  border-left: 0;
+  background: #fff;
+  color: #172535;
+  font-size: inherit;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: left;
+  white-space: normal;
+}
+
+/* The Local Authorities heading solely owns the separator between groups.
+   Data rows do not add outer side or bottom edges over the wrapper perimeter. */
+body.home-page .dashboard-table--areas.area-table--grouped tbody tr[data-area-type="pcon"] > td {
+  border-bottom: 0 !important;
+}
+
+body.home-page .dashboard-table--areas.area-table--grouped .area-reading-group-row[data-area-group="la"] > th {
+  border-top: 1.5px solid var(--area-group-border);
+}
+
+/* Preserve normal wrapping. Only a residual single-word overflow is allowed to
+   reduce that individual area name. */
+body.home-page .dashboard-table--areas .area-reading-name.area-reading-name--fit-90 {
+  font-size: 90% !important;
+}
+
+body.home-page .dashboard-table--areas .area-reading-name.area-reading-name--fit-85 {
+  font-size: 85% !important;
+}
+
+body.home-page .dashboard-table--areas .area-reading-name.area-reading-name--fit-80 {
+  font-size: 80% !important;
+}
+
+body.home-page .dashboard-table--areas .area-reading-name.area-reading-name--emergency-wrap {
+  overflow-wrap: anywhere !important;
+}
+
+/* Homepage network table overflow sequence. The permanent controller applies
+   these classes after measuring the rendered table against its wrapper. */
+body.home-page .dashboard-table--networks {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: auto;
+}
+
+body.home-page .dashboard-table--networks tbody th[scope="row"] {
+  white-space: nowrap;
+}
+
+body.home-page .dashboard-table--networks.is-network-name-wrap tbody th[scope="row"],
+body.home-page .dashboard-table--networks tbody th.network-summary-label-split {
+  white-space: normal !important;
+}
+
+body.home-page .dashboard-table--networks th:nth-child(2),
+body.home-page .dashboard-table--networks td:nth-child(2) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+body.home-page .dashboard-table--networks td:nth-child(2) time {
+  white-space: nowrap;
+}
+
+body.home-page .dashboard-table--networks.is-network-updated-hidden th:nth-child(2),
+body.home-page .dashboard-table--networks.is-network-updated-hidden td:nth-child(2) {
+  display: none !important;
 }

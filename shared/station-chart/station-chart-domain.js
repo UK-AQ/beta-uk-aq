@@ -1,10 +1,17 @@
 // Shared pure domain helpers for UK AQ station charts.
 (function (root, factory) {
-  const api = factory();
+  const pollutants = typeof module === "object" && module.exports
+    ? require("../domain/pollutants.js")
+    : root.UkAqPollutants;
+  const api = factory(pollutants);
   if (typeof module === "object" && module.exports) module.exports = api;
   root.UkAqStationChartDomain = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (pollutants) {
   "use strict";
+
+  if (!pollutants?.normalize) {
+    throw new Error("UK AQ pollutant domain must load before the station-chart domain.");
+  }
 
   const HOUR_MS = 60 * 60 * 1000;
   const LOAD_REASONS = new Set([
@@ -60,8 +67,7 @@
   }
 
   function normalizePollutant(value) {
-    const normalized = String(value ?? "").trim().toLowerCase().replace(/[\s._-]+/g, "");
-    return ["pm25", "pm10", "no2"].includes(normalized) ? normalized : null;
+    return pollutants.normalize(value);
   }
 
   function hasPositiveTimeseriesIdentity(entry) {

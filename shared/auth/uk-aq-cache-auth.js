@@ -4,6 +4,8 @@
 (() => {
   "use strict";
 
+  const SHARED_TURNSTILE_SITE_KEY_PLACEHOLDER = "0x4AAAAAADvk69amXC9V2nNx";
+
   if (window.ukAqSharedAuth?.fetchCacheApi) {
     window.ukAqFetchCacheApi = window.ukAqSharedAuth.fetchCacheApi;
     return;
@@ -27,6 +29,7 @@
   let widgetId = null;
   let resolveToken = null;
   let rejectToken = null;
+  let tokenTimeoutId = null;
 
   function debug(event, details = {}) {
     if (params.get("turnstile_debug") === "1") {
@@ -37,6 +40,12 @@
   function configuredSiteKey() {
     const queryKey = String(params.get("turnstile_site_key") || "").trim();
     if (queryKey) return queryKey;
+
+    const sharedKey = String(SHARED_TURNSTILE_SITE_KEY_PLACEHOLDER || "").trim();
+    if (sharedKey && !sharedKey.includes("__UK_AQ_TURNSTILE_SITE_KEY__")) {
+      return sharedKey;
+    }
+
     try {
       if (typeof TURNSTILE_SITE_KEY_PLACEHOLDER === "string"
           && !TURNSTILE_SITE_KEY_PLACEHOLDER.includes("__UK_AQ_TURNSTILE_SITE_KEY__")) {
@@ -106,6 +115,15 @@
     return container;
   }
 
+  function clearTurnstilePendingState() {
+    if (tokenTimeoutId !== null) {
+      clearTimeout(tokenTimeoutId);
+      tokenTimeoutId = null;
+    }
+    resolveToken = null;
+    rejectToken = null;
+  }
+
   async function ensureTurnstileScript() {
     if (window.turnstile?.render) return;
     if (!scriptInflight) {
@@ -134,7 +152,11 @@
     if (!siteKey) throw new Error("Missing Turnstile site key.");
     await ensureTurnstileScript();
     if (widgetId !== null) return widgetId;
-    widgetId = window.turnstile.render(ensureTurnstileContainer(), {
+    const turnstileApi = window.turnstile;
+    if (!turnstileApi || typeof turnstileApi.render !== "function") {
+      throw new Error("Turnstile SDK unavailable.");
+    }
+    widgetId = turnstileApi.render(ensureTurnstileContainer(), {
       sitekey: siteKey,
       appearance: "interaction-only",
       execution: "execute",
@@ -142,18 +164,31 @@
       "before-interactive-callback": showTurnstileContainer,
       callback: (token) => {
         const resolve = resolveToken;
-        resolveToken = null;
-        rejectToken = null;
+        clearTurnstilePendingState();
+        debug("turnstile-token-received");
         hideTurnstileContainer();
         if (resolve) resolve(token);
       },
       "error-callback": (code) => {
         const reject = rejectToken;
-        resolveToken = null;
-        rejectToken = null;
+        clearTurnstilePendingState();
+        debug("turnstile-error", { code: code || "unknown" });
         if (reject) reject(new Error(`Turnstile failed: ${code || "unknown error"}`));
       },
+      "expired-callback": () => {
+        const reject = rejectToken;
+        clearTurnstilePendingState();
+        debug("turnstile-token-expired");
+        if (reject) reject(new Error("Turnstile token expired."));
+      },
+      "timeout-callback": () => {
+        const reject = rejectToken;
+        clearTurnstilePendingState();
+        debug("turnstile-challenge-timed-out");
+        if (reject) reject(new Error("Turnstile challenge timed out."));
+      },
     });
+    debug("turnstile-widget-rendered", { widgetId: widgetId !== null });
     return widgetId;
   }
 
@@ -161,18 +196,26 @@
     if (!tokenInflight) {
       tokenInflight = (async () => {
         const id = await ensureTurnstileWidget();
+        const turnstileApi = window.turnstile;
+        if (!turnstileApi || typeof turnstileApi.execute !== "function") {
+          throw new Error("Turnstile execute unavailable.");
+        }
         const promise = new Promise((resolve, reject) => {
           resolveToken = resolve;
           rejectToken = reject;
-          setTimeout(() => {
-            if (rejectToken === reject) {
-              resolveToken = null;
-              rejectToken = null;
-              reject(new Error("Turnstile token timed out."));
-            }
+          tokenTimeoutId = setTimeout(() => {
+            const timeoutReject = rejectToken;
+            clearTurnstilePendingState();
+            if (timeoutReject) timeoutReject(new Error("Turnstile token timed out."));
           }, 30000);
         });
-        window.turnstile.execute(id);
+        try {
+          debug("turnstile-execute-started");
+          turnstileApi.execute(id);
+        } catch (error) {
+          clearTurnstilePendingState();
+          throw error;
+        }
         return promise;
       })().finally(() => { tokenInflight = null; });
     }
@@ -196,7 +239,10 @@
         if (!response.ok) throw new Error(`Session start failed: ${response.status}`);
         const payload = await response.json().catch(() => ({}));
         const seconds = Number(payload?.session_expires_in);
-        sessionUntil = Date.now() + Math.max(30000, (Number.isFinite(seconds) ? seconds : 300) * 1000);
+        const validSeconds = Number.isFinite(seconds) && seconds > 0
+          ? seconds
+          : 300;
+        sessionUntil = Date.now() + Math.max(30000, validSeconds * 1000);
         writeHint(sessionUntil);
         debug("session-started");
         return "session";
