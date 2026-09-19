@@ -18,7 +18,7 @@
         { label: 'Hex Map',     iconImg: 'uk-aq-hex-map-sidebar.svg', href: '/hex_map/' },
         //{ label: 'Sensors',     iconImg: 'uk-aq-sensors-icon-blue.svg',  href: '/sensors/' },
         { label: 'Sensor Map', iconImg: 'uk-aq-location-pin.svg',       href: '/sensor_map/' },
-        { label: 'AQ in the News', iconImg: 'uk-aq-news-sidebar-button.svg', href: '/news/', className: 'uk-aq-nav-item--wordmark' },
+        { label: 'AQ in the News', iconImg: 'uk-aq-news-sidebar-button.svg', href: '/news/', className: 'uk-aq-nav-item--wordmark uk-aq-nav-item--news' },
       ],
     },
 /*    {
@@ -268,9 +268,9 @@
       --uk-aq-line-soft:     #eef0f3;
       --uk-aq-surface:       #ffffff;
       --uk-aq-surface-2:     #fbfaf6;
-      --uk-aq-sidebar-w:             232px;
+      --uk-aq-sidebar-w:             212px;
       --uk-aq-sidebar-mini-w:        64px;
-      --uk-aq-sidebar-drawer-w:      280px;
+      --uk-aq-sidebar-drawer-w:      212px;
       --uk-aq-ease:          0.3s ease;
       --uk-aq-font:          'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
@@ -360,7 +360,7 @@
     #ukaq-home-logo {
       position: absolute;
       top: 16px; right: 28px;
-      z-index: 10011;
+      z-index: 10008;
       display: block;
       border-radius: 16px;
       overflow: visible;
@@ -443,7 +443,7 @@
 	  border-radius: 7px;
 	  color: var(--uk-aq-ink-2);
 	  font-size: 15px;
-	  font-weight: 500;
+	  font-weight: 700;
 	  font-family: var(--uk-aq-font);
 	  text-decoration: none;
 	  border: 1px solid transparent;
@@ -510,6 +510,9 @@
       max-width: none !important;
       max-height: 24px !important;
       object-fit: contain;
+    }
+    .uk-aq-nav-item--news .uk-aq-nav-label {
+      margin-left: 3px;
     }
     .uk-aq-nav-icon-placeholder {
       width: 34px;
@@ -858,18 +861,12 @@
       updateHamburgerIcon(btn);
     });
 
-    // Left-edge hover re-expand (desktop)
-    document.addEventListener('mousemove', e => {
-      if (getBreakpoint() !== 'desktop') return;
-      if (!pinnedOpenDesktop && e.clientX < 20 && (getState() === COLLAPSED || getState() === MINI)) {
-        clearTimeout(autoCollapseTimer);
-        setState(EXPANDED);
-      }
-    });
-
-    // Cancel auto-collapse while mouse is inside sidebar
+    // Desktop hover-expand for the full mini sidebar strip
     document.getElementById('uk-aq-sidebar').addEventListener('mouseenter', () => {
       clearTimeout(autoCollapseTimer);
+      if (getBreakpoint() === 'desktop' && !pinnedOpenDesktop && getState() === MINI) {
+        setState(EXPANDED);
+      }
     });
 
     // Resume auto-collapse on mouse leave
