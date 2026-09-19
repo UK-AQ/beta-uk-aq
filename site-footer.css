@@ -2,13 +2,16 @@
  * The footer markup is mounted by sidebar.js and must remain independent of beta UI.
  */
 
-/* Keep the footer visually close enough to the final card to be discoverable. */
+/* Desktop/tablet keeps a separate gap between the map card and footer.
+ * Cardless mobile uses only the legend's existing inset inside the canvas. */
 .hex-map-page main {
-  padding-bottom: 32px !important;
+  padding-bottom: 0 !important;
 }
 
-.home-page .home-main {
-  padding-bottom: 48px !important;
+@media (min-width: 768px) {
+  .hex-map-page main {
+    padding-bottom: 16px !important;
+  }
 }
 
 /*
@@ -25,6 +28,19 @@ body:has(> #ukaq-site-footer):not(.ukaq-site-footer-after-viewport) {
 body:has(> #ukaq-site-footer):not(.ukaq-site-footer-after-viewport) > #ukaq-site-footer {
   margin-top: auto;
   flex: 0 0 auto;
+}
+
+/* The cardless mobile Hex Map footer follows the map content directly instead
+ * of absorbing spare viewport height above the footer. */
+@media (max-width: 767px) {
+  body.hex-map-page:has(> #ukaq-site-footer):not(.ukaq-site-footer-after-viewport) {
+    min-height: 0;
+  }
+
+  body.hex-map-page:has(> #ukaq-site-footer):not(.ukaq-site-footer-after-viewport)
+    > #ukaq-site-footer {
+    margin-top: 0;
+  }
 }
 
 body #ukaq-site-footer {
@@ -59,6 +75,24 @@ body #ukaq-site-footer {
   max-width: 100%;
   box-sizing: border-box;
   border-top: 1px solid #e1e3e6;
+}
+
+#ukaq-site-footer .ukaq-site-footer-sources[hidden] {
+  display: none;
+}
+
+@media (min-width: 1001px) {
+  #ukaq-site-footer .ukaq-site-footer-sources[data-source-count="1"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #ukaq-site-footer .ukaq-site-footer-sources[data-source-count="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #ukaq-site-footer .ukaq-site-footer-sources[data-source-count="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 #ukaq-site-footer .ukaq-site-footer-source {
@@ -206,6 +240,10 @@ body.ukaq-site-footer-after-viewport #ukaq-site-footer {
 @media (max-width: 1000px) {
   #ukaq-site-footer .ukaq-site-footer-sources {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #ukaq-site-footer .ukaq-site-footer-sources[data-source-count="1"] {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   #ukaq-site-footer .ukaq-site-footer-source:nth-child(3)::before {

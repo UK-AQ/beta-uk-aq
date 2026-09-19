@@ -643,6 +643,35 @@
   }
 }
 
+/* Let an inactive message use the full centre of the circle instead of the
+   numeric value row while the pollutant name remains at the top. */
+.home-page .pollutant-circle.pollutant-circle--inactive {
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.home-page .pollutant-circle--inactive .pollutant-value-slot {
+  grid-row: 2;
+  min-height: 0;
+  height: auto;
+  margin-top: 0;
+  top: 0;
+  align-self: stretch;
+}
+
+.home-page .pollutant-circle--inactive .pollutant-value {
+  max-width: 92%;
+  font-size: clamp(1.2rem, 2.2vw, 1.55rem);
+  line-height: 1.18;
+  white-space: normal;
+}
+
+.home-page .pollutant-circle--inactive .pollutant-observed,
+.home-page .pollutant-circle--inactive .pollutant-station,
+.home-page .pollutant-circle--inactive .pollutant-network {
+  display: none !important;
+}
+
 /* Compensate for the wider right-hand legend endpoint labels at responsive widths. */
 @media (min-width: 768px) and (max-width: 1079px) {
   .home-page .scale-legend {

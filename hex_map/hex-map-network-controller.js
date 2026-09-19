@@ -1,4 +1,6 @@
 import networkCatalog from "../shared/data/network-catalog-module.js";
+import networkDomain from "../shared/domain/networks-module.js";
+import pollutantDomain from "../shared/domain/pollutants-module.js";
 
 function initHexMapNetworkController(root) {
   "use strict";
@@ -6,8 +8,8 @@ function initHexMapNetworkController(root) {
   if (!root?.document || !document.body.classList.contains("hex-map-page")) return;
 
   const catalogClient = networkCatalog;
-  if (!catalogClient?.load) {
-    throw new Error("The shared UK AQ network catalogue loader must load before the Hex network controller.");
+  if (!catalogClient?.load || !networkDomain?.resolveCode || !pollutantDomain?.normalize) {
+    throw new Error("The shared UK AQ network and pollutant modules must load before the Hex network controller.");
   }
 
   const list = document.getElementById("network-list");
@@ -17,7 +19,11 @@ function initHexMapNetworkController(root) {
   const dropdownCount = document.getElementById("network-dropdown-count");
   const panelPin = document.getElementById("networks-panel-pin");
   const panelPinIcon = document.getElementById("networks-panel-pin-icon");
+  const panelClose = document.getElementById("networks-panel-close");
   const pills = Array.from(document.querySelectorAll("[data-networks-pill]"));
+  const mobileLayoutQuery = typeof root.matchMedia === "function"
+    ? root.matchMedia("(max-width: 767px)")
+    : null;
   const scopes = new Map();
   const consumers = new Map();
   const STORAGE_KEY = "uk-aq-hex-map-network-selection-v1";
@@ -28,15 +34,16 @@ function initHexMapNetworkController(root) {
   let catalogLoad = null;
   let selectedCodes = initialSelection;
   let activeScope = "uk";
+  let activePollutant = null;
+  const capabilityByPollutant = new Map();
   let renderedKey = "";
   let panelPinned = false;
   let panelAnchorPill = null;
-  let panelPinnedWidthPx = null;
-  let panelPinnedTopPx = null;
-  let panelPinnedLeftPx = null;
   let cachedPanelWidth = 0;
+  let panelPresentationFrame = null;
 
   const PANEL_MARGIN_PX = 8;
+  const SEARCH_PANEL_GAP_PX = 12;
   const LONDON_MAP_GAP_PX = -72;
   const PIN_ICON_OFF_SRC = "/images/UK-AQ_pin100_off.svg";
   const PIN_ICON_ON_SRC = "/images/UK-AQ_pin100_on.svg";
@@ -86,6 +93,24 @@ function initHexMapNetworkController(root) {
 
   function normalizeCode(value) {
     return String(value || "").trim().toLowerCase();
+  }
+
+  function isMobileInlinePresentation() {
+    return Boolean(mobileLayoutQuery?.matches);
+  }
+
+  function getInlinePanelMount() {
+    const mapKind = activeScope === "cr" ? "cr" : "uk";
+    const selector = document.body.classList.contains("hex-chart-mode")
+      ? `[data-mobile-chart-controls][data-map-kind="${mapKind}"] [data-mobile-chart-networks-panel]`
+      : `[data-mobile-map-controls-row][data-map-kind="${mapKind}"] [data-mobile-map-networks-panel]`;
+    return document.querySelector(selector);
+  }
+
+  function syncInlinePanelMountState(isOpen = !dropdownMenu?.hidden) {
+    document.querySelectorAll("[data-mobile-chart-networks-panel], [data-mobile-map-networks-panel]").forEach((mount) => {
+      mount.classList.toggle("is-networks-panel-open", Boolean(isOpen && mount === dropdownMenu?.parentElement));
+    });
   }
 
   function readPersistedSelection() {
@@ -140,6 +165,46 @@ function initHexMapNetworkController(root) {
     return selectedCodes === null ? null : new Set(selectedCodes);
   }
 
+  function capabilitySnapshot(pollutant = activePollutant) {
+    const key = pollutantDomain.normalize(pollutant);
+    const capability = key ? capabilityByPollutant.get(key) : null;
+    return Object.freeze({
+      pollutant: key,
+      status: capability ? "ready" : "unknown",
+      supportedCodes: new Set(capability?.supportedCodes || []),
+    });
+  }
+
+  function supportsPollutant(code, pollutant = activePollutant) {
+    const capability = capabilitySnapshot(pollutant);
+    if (capability.status !== "ready") return null;
+    return capability.supportedCodes.has(normalizeCode(code));
+  }
+
+  function updatePollutantCapability(pollutant, rows) {
+    const key = pollutantDomain.normalize(pollutant);
+    if (!key || !Array.isArray(rows)) return false;
+    const supportedCodes = new Set(rows
+      .map((row) => normalizeCode(networkDomain.resolveCode(row)))
+      .filter(Boolean));
+    const fingerprint = Array.from(supportedCodes).sort().join("|");
+    if (capabilityByPollutant.get(key)?.fingerprint === fingerprint) return false;
+    capabilityByPollutant.set(key, { supportedCodes, fingerprint });
+    if (key === activePollutant) renderActiveScope({ force: true });
+    root.dispatchEvent(new CustomEvent("pollutantcapabilitychange", {
+      detail: { pollutant: key, capability: capabilitySnapshot(key) },
+    }));
+    return true;
+  }
+
+  function setActivePollutant(value) {
+    const next = pollutantDomain.normalize(value);
+    if (!next || next === activePollutant) return false;
+    activePollutant = next;
+    renderActiveScope({ force: true });
+    return true;
+  }
+
   function selectedEntries() {
     const definitions = getCatalog();
     const selected = selectionSnapshot();
@@ -148,7 +213,12 @@ function initHexMapNetworkController(root) {
       .map((definition) => ({
         code: normalizeCode(definition.code),
         label: String(definition.label || "").toLowerCase(),
+        displayLabel: String(definition.label || "").trim(),
       }));
+  }
+
+  function effectiveSelectedEntries() {
+    return selectedEntries().filter((entry) => supportsPollutant(entry.code) !== false);
   }
 
   function persistSelection() {
@@ -232,11 +302,15 @@ function initHexMapNetworkController(root) {
 
   function presentationKey(presentation) {
     if (!presentation?.definitions?.length) return `${activeScope}:empty`;
+    const capability = capabilitySnapshot();
+    const capabilityKey = capability.status === "ready"
+      ? Array.from(capability.supportedCodes).sort().join(",")
+      : capability.status;
     return `${activeScope}:` + presentation.definitions.map((definition) => {
       const code = normalizeCode(definition.code);
       const covered = presentation.coverageByCode.get(code)?.size || 0;
       return `${code}:${definition.label}:${definition.count}:${covered}:${presentation.coverageTotal}`;
-    }).join("|");
+    }).join("|") + `:${activePollutant || "none"}:${capabilityKey}`;
   }
 
   function renderActiveScope(options = {}) {
@@ -260,6 +334,8 @@ function initHexMapNetworkController(root) {
     presentation.definitions.forEach((definition) => {
       const code = normalizeCode(definition.code);
       const count = Number(definition.count) || 0;
+      const pollutantLabel = pollutantDomain.get(activePollutant)?.typographicLabel || activePollutant || "this pollutant";
+      const isUnsupported = supportsPollutant(code) === false;
       const sharePercent = totalSensors ? Math.max(0, Math.min(100, (count / totalSensors) * 100)) : 0;
       const coverageCount = presentation.coverageByCode.get(code)?.size || 0;
       const coveragePercent = presentation.coverageTotal > 0
@@ -267,10 +343,15 @@ function initHexMapNetworkController(root) {
         : 0;
       const label = document.createElement("label");
       label.className = "checkbox network-option";
+      label.classList.toggle("is-pollutant-unavailable", isUnsupported);
       const input = document.createElement("input");
       input.type = "checkbox";
       input.dataset.network = code;
       input.checked = selectedCodes === null || selectedCodes.has(code);
+      input.disabled = isUnsupported;
+      if (isUnsupported) {
+        input.setAttribute("aria-label", `${definition.label} does not monitor ${pollutantLabel}`);
+      }
       const mainRow = document.createElement("span");
       mainRow.className = "network-option-main";
       const leftGroup = document.createElement("span");
@@ -290,9 +371,12 @@ function initHexMapNetworkController(root) {
       leftGroup.append(input, nameWrap);
       const countText = document.createElement("span");
       countText.className = "network-count";
-      if (count > 0) countText.textContent = count.toLocaleString();
+      if (isUnsupported) countText.textContent = "N/A";
+      else countText.textContent = count.toLocaleString();
       mainRow.append(leftGroup, countText);
-      label.title = `${definition.label}\n${count.toLocaleString()} active sensors\n${Math.round(sharePercent)}% of sensors across all available networks`;
+      label.title = isUnsupported
+        ? `${definition.label} does not monitor ${pollutantLabel}`
+        : `${definition.label}\n${count.toLocaleString()} active sensors\n${Math.round(sharePercent)}% of sensors across all available networks`;
 
       const shareBar = document.createElement("span");
       shareBar.className = "network-share-bar";
@@ -302,6 +386,7 @@ function initHexMapNetworkController(root) {
       shareBar.setAttribute("aria-valuemax", "100");
       shareBar.setAttribute("aria-valuenow", String(Math.round(sharePercent)));
       shareBar.setAttribute("aria-valuetext", `${Math.round(sharePercent)}% of active sensors`);
+      shareBar.hidden = isUnsupported;
       const shareFill = document.createElement("span");
       shareFill.className = "network-share-fill";
       shareFill.style.width = `${sharePercent.toFixed(1)}%`;
@@ -309,11 +394,15 @@ function initHexMapNetworkController(root) {
 
       const coverageText = document.createElement("span");
       coverageText.className = "network-option-coverage";
-      coverageText.textContent = `${coveragePercent}% coverage`;
-      coverageText.setAttribute(
-        "aria-label",
-        `${definition.label} coverage ${coveragePercent}% (${coverageCount} of ${presentation.coverageTotal} ${presentation.coverageAreaLabel})`,
-      );
+      if (isUnsupported) {
+        coverageText.textContent = `Does not monitor ${pollutantLabel}`;
+      } else {
+        coverageText.textContent = `${coveragePercent}% coverage`;
+        coverageText.setAttribute(
+          "aria-label",
+          `${definition.label} coverage ${coveragePercent}% (${coverageCount} of ${presentation.coverageTotal} ${presentation.coverageAreaLabel})`,
+        );
+      }
       label.append(mainRow, shareBar, coverageText);
       appendLogo(label, definition);
       fragment.appendChild(label);
@@ -367,24 +456,46 @@ function initHexMapNetworkController(root) {
     return list ? Array.from(list.querySelectorAll("input[data-network]")) : [];
   }
 
+  function getEffectiveSelectableInputs(inputs = getInputs()) {
+    return inputs.filter((input) => !input.disabled);
+  }
+
+  function getEffectiveSelectedInputs(inputs = getInputs()) {
+    return getEffectiveSelectableInputs(inputs).filter((input) => input.checked);
+  }
+
   function syncSelectionUi() {
     const inputs = getInputs();
     inputs.forEach((input) => {
       input.checked = selectedCodes === null || selectedCodes.has(normalizeCode(input.dataset.network));
       input.closest(".network-option")?.classList.toggle("is-unselected", !input.checked);
     });
-    const selectedCount = inputs.filter((input) => input.checked).length;
-    if (selectAllButton) selectAllButton.disabled = !inputs.length || selectedCount === inputs.length;
-    if (keepOneButton) keepOneButton.disabled = !inputs.length || selectedCount <= 1;
-    updateDropdownState(inputs.length, selectedCount);
+    const selectableInputs = getEffectiveSelectableInputs(inputs);
+    const selectedInputs = getEffectiveSelectedInputs(inputs);
+    if (selectAllButton) {
+      selectAllButton.disabled = !selectableInputs.length || selectedInputs.length === selectableInputs.length;
+    }
+    if (keepOneButton) keepOneButton.disabled = selectedInputs.length <= 1;
+    updateDropdownState(inputs);
   }
 
-  function updateDropdownState(total = getInputs().length, selected = getInputs().filter((input) => input.checked).length) {
+  function updateDropdownState(inputs = getInputs()) {
+    const total = inputs.length;
+    const selectable = getEffectiveSelectableInputs(inputs).length;
+    const selected = getEffectiveSelectedInputs(inputs).length;
+    const allEffectiveSelected = selectable > 0 && selected === selectable;
     if (dropdownCount) dropdownCount.textContent = `${selected} / ${total}`;
     const pillText = total === 0 ? "Networks: —" : selected === total ? "Networks: All" : `Networks: ${selected} / ${total}`;
+    const mobilePillText = total === 0
+      ? "Networks · —"
+      : allEffectiveSelected
+        ? "Networks · All"
+        : `Networks · ${selected} selected`;
     pills.forEach((pill) => {
       const text = pill.querySelector(".networks-pill-text");
-      if (text) text.textContent = pillText;
+      if (text) text.textContent = isMobileInlinePresentation() && isPillVisible(pill)
+        ? mobilePillText
+        : pillText;
     });
     ["top-total-sensors-subtext", "cr-top-total-sensors-subtext"].forEach((id) => {
       const element = document.getElementById(id);
@@ -410,12 +521,26 @@ function initHexMapNetworkController(root) {
     setSelection(next, { source: "checkbox" });
   });
 
-  selectAllButton?.addEventListener("click", () => setSelection(null, { source: "select-all" }));
+  selectAllButton?.addEventListener("click", () => {
+    const next = selectedCodes === null
+      ? new Set(getCatalog().map((definition) => normalizeCode(definition.code)))
+      : new Set(selectedCodes);
+    getEffectiveSelectableInputs().forEach((input) => next.add(normalizeCode(input.dataset.network)));
+    setSelection(next, { source: "select-all" });
+  });
   keepOneButton?.addEventListener("click", () => {
-    const definitions = scopes.get(activeScope)?.definitions || getCatalog();
-    const selected = definitions.map((definition) => normalizeCode(definition.code))
-      .filter((code) => selectedCodes === null || selectedCodes.has(code));
-    if (selected.length > 1) setSelection(new Set([selected[0]]), { source: "keep-one" });
+    const inputs = getInputs();
+    const selectedInputs = getEffectiveSelectedInputs(inputs);
+    if (selectedInputs.length <= 1) return;
+    const selectableCodes = new Set(
+      getEffectiveSelectableInputs(inputs).map((input) => normalizeCode(input.dataset.network)),
+    );
+    const storedCodes = selectedCodes === null
+      ? getCatalog().map((definition) => normalizeCode(definition.code))
+      : Array.from(selectedCodes);
+    const next = new Set(storedCodes.filter((code) => !selectableCodes.has(code)));
+    next.add(normalizeCode(selectedInputs[0].dataset.network));
+    setSelection(next, { source: "keep-one" });
   });
 
   function isPillVisible(pill) {
@@ -434,6 +559,7 @@ function initHexMapNetworkController(root) {
   }
 
   function getFloatingHost(pill) {
+    if (isMobileInlinePresentation()) return getInlinePanelMount() || getMapWrap(pill || getActivePill()) || document.body;
     return getMapWrap(pill || getActivePill()) || document.body;
   }
 
@@ -450,19 +576,22 @@ function initHexMapNetworkController(root) {
     clearDockedHosts();
     const host = getFloatingHost(pill);
     if (dropdownMenu.parentElement !== host) host.appendChild(dropdownMenu);
+    dropdownMenu.setAttribute("role", isMobileInlinePresentation() ? "region" : "dialog");
+    dropdownMenu.setAttribute("aria-modal", "false");
     dropdownMenu.classList.remove("is-docked");
-    dropdownMenu.classList.add("is-floating");
-    if (!panelPinned) {
+    dropdownMenu.classList.toggle("is-inline", isMobileInlinePresentation());
+    dropdownMenu.classList.toggle("is-floating", !isMobileInlinePresentation());
+    if (isMobileInlinePresentation()) {
       dropdownMenu.style.width = "";
       dropdownMenu.style.top = "";
       dropdownMenu.style.left = "";
       dropdownMenu.style.right = "";
     }
+    syncInlinePanelMountState();
   }
 
   function getPanelWidth() {
     if (!dropdownMenu) return 0;
-    if (Number.isFinite(panelPinnedWidthPx) && panelPinnedWidthPx > 0) return panelPinnedWidthPx;
     if (cachedPanelWidth > 0) return cachedPanelWidth;
     const previous = {
       hidden: dropdownMenu.hidden,
@@ -490,19 +619,64 @@ function initHexMapNetworkController(root) {
     getPanelWidth();
   }
 
+  function clearSearchSafeArea() {
+    document.querySelectorAll("[data-toolbar-search-row]").forEach((row) => {
+      row.classList.remove("has-networks-panel-search-safe-area");
+      row.style.removeProperty("--networks-panel-search-safe-width");
+    });
+  }
+
+  function updatePanelPresentationState() {
+    const isOpen = Boolean(dropdownMenu && !dropdownMenu.hidden);
+    document.body.dataset.networksPanelPresentation = isOpen
+      ? (isMobileInlinePresentation() ? "inline" : "floating")
+      : "closed";
+    document.body.dataset.networksPanelPinned = String(panelPinned);
+  }
+
+  function updateSearchSafeArea() {
+    clearSearchSafeArea();
+    updatePanelPresentationState();
+    if (isMobileInlinePresentation()
+        || !dropdownMenu
+        || dropdownMenu.hidden
+        || !dropdownMenu.classList.contains("is-floating")) return;
+
+    const searchRow = document.querySelector("[data-toolbar-search-row]");
+    const search = searchRow?.querySelector(".map-search");
+    if (!searchRow || !search) return;
+
+    const panelRect = dropdownMenu.getBoundingClientRect();
+    const searchRect = search.getBoundingClientRect();
+    if (!panelRect.width || !searchRect.width) return;
+
+    const safeWidth = Math.max(0, Math.min(
+      searchRect.width,
+      Math.floor(panelRect.left - SEARCH_PANEL_GAP_PX - searchRect.left),
+    ));
+    if (safeWidth >= searchRect.width) return;
+
+    searchRow.style.setProperty("--networks-panel-search-safe-width", `${safeWidth}px`);
+    searchRow.classList.add("has-networks-panel-search-safe-area");
+  }
+
   function applyPinnedPlacement() {
     if (!dropdownMenu) return;
-    const anchor = panelAnchorPill || getActivePill();
-    setFloatingHost(anchor);
-    if (Number.isFinite(panelPinnedWidthPx)) dropdownMenu.style.width = `${panelPinnedWidthPx}px`;
-    if (Number.isFinite(panelPinnedTopPx)) dropdownMenu.style.top = `${panelPinnedTopPx}px`;
-    if (Number.isFinite(panelPinnedLeftPx)) dropdownMenu.style.left = `${panelPinnedLeftPx}px`;
-    dropdownMenu.style.right = "auto";
+    const anchor = getActivePill();
+    if (anchor) panelAnchorPill = anchor;
+    positionPanel(panelAnchorPill || anchor);
   }
 
   function updatePanelSafeArea() {
+    updateSearchSafeArea();
+    if (isMobileInlinePresentation()) {
+      document.querySelectorAll(".map-canvas-wrap").forEach((wrap) => {
+        wrap.classList.remove("has-networks-panel-safe-area");
+        wrap.style.removeProperty("--networks-panel-safe-right");
+      });
+      return;
+    }
     if (!panelPinned || !dropdownMenu || dropdownMenu.hidden) clearDockedHosts();
-    else applyPinnedPlacement();
     let targetWrap = null;
     let targetSafeRight = null;
     const londonActive = activeScope === "cr" && String(root.crMap?.getRegion?.() || "").toLowerCase() === "london";
@@ -532,14 +706,32 @@ function initHexMapNetworkController(root) {
   function positionPanel(pill) {
     if (!dropdownMenu) return;
     if (!pill) return updatePanelSafeArea();
-    if (panelPinned) return applyPinnedPlacement();
+    if (isMobileInlinePresentation()) {
+      setFloatingHost(pill);
+      dropdownMenu.style.width = "";
+      dropdownMenu.style.top = "";
+      dropdownMenu.style.left = "";
+      dropdownMenu.style.right = "";
+      updatePanelSafeArea();
+      return;
+    }
     setFloatingHost(pill);
+    dropdownMenu.style.width = "";
     const host = getFloatingHost(pill);
     const rect = pill.getBoundingClientRect();
-    const panelRect = dropdownMenu.getBoundingClientRect();
     const hostRect = host.getBoundingClientRect();
     const hostWidth = host === document.body ? root.innerWidth : hostRect.width;
     const hostHeight = host === document.body ? root.innerHeight : hostRect.height;
+    const availableWidth = Math.max(0, Math.min(
+      hostWidth - (PANEL_MARGIN_PX * 2),
+      root.innerWidth - (PANEL_MARGIN_PX * 2),
+    ));
+    let panelRect = dropdownMenu.getBoundingClientRect();
+    if (availableWidth > 0 && panelRect.width > availableWidth) {
+      dropdownMenu.style.width = `${Math.floor(availableWidth)}px`;
+      panelRect = dropdownMenu.getBoundingClientRect();
+    }
+    cachedPanelWidth = panelRect.width || 0;
     let top = rect.bottom - hostRect.top + PANEL_MARGIN_PX;
     let left = rect.right - hostRect.left - panelRect.width;
     if (left < PANEL_MARGIN_PX) left = PANEL_MARGIN_PX;
@@ -554,39 +746,54 @@ function initHexMapNetworkController(root) {
     updatePanelSafeArea();
   }
 
-  function setPanelOpen(isOpen, anchorPill) {
+  function syncPanelTriggerState() {
+    const isOpen = Boolean(dropdownMenu && !dropdownMenu.hidden);
+    pills.forEach((pill) => pill.setAttribute("aria-expanded", String(isOpen && pill === panelAnchorPill)));
+  }
+
+  function schedulePanelPresentationSync() {
+    if (panelPresentationFrame !== null) return;
+    panelPresentationFrame = root.requestAnimationFrame(() => {
+      panelPresentationFrame = null;
+      if (!dropdownMenu || dropdownMenu.hidden) {
+        syncPanelTriggerState();
+        updatePanelSafeArea();
+        return;
+      }
+      const activePill = getActivePill();
+      if (activePill) panelAnchorPill = activePill;
+      if (panelPinned) applyPinnedPlacement();
+      else positionPanel(panelAnchorPill || activePill);
+      syncPanelTriggerState();
+    });
+  }
+
+  function setPanelOpen(isOpen, anchorPill, options = {}) {
     if (!dropdownMenu) return;
+    const focusTarget = panelAnchorPill || anchorPill || getActivePill();
     dropdownMenu.hidden = !isOpen;
+    dropdownMenu.setAttribute("aria-modal", "false");
     if (isOpen) {
       panelAnchorPill = anchorPill || getActivePill();
-      root.requestAnimationFrame(() => positionPanel(panelAnchorPill));
+      setFloatingHost(panelAnchorPill);
+      schedulePanelPresentationSync();
     } else {
-      if (!panelPinned) panelAnchorPill = null;
+      if (!panelPinned || isMobileInlinePresentation()) panelAnchorPill = null;
       setFloatingHost();
       updatePanelSafeArea();
     }
-    pills.forEach((pill) => pill.setAttribute("aria-expanded", String(isOpen && pill === panelAnchorPill)));
+    syncInlinePanelMountState(isOpen);
+    syncPanelTriggerState();
+    if (!isOpen && options.restoreFocus) focusTarget?.focus?.({ preventScroll: true });
   }
 
   function setPanelPinned(nextPinned) {
     panelPinned = Boolean(nextPinned);
-    if (!panelPinned) {
-      panelPinnedWidthPx = null;
-      panelPinnedTopPx = null;
-      panelPinnedLeftPx = null;
-    } else if (dropdownMenu && !dropdownMenu.hidden) {
-      const rect = dropdownMenu.getBoundingClientRect();
-      const anchor = panelAnchorPill || getActivePill();
-      const hostRect = getFloatingHost(anchor).getBoundingClientRect();
-      panelPinnedWidthPx = rect.width || null;
-      panelPinnedTopPx = rect.top - hostRect.top;
-      panelPinnedLeftPx = rect.left - hostRect.left;
-    }
     panelPin?.setAttribute("aria-pressed", String(panelPinned));
     panelPin?.setAttribute("aria-label", panelPinned ? "Unpin networks panel" : "Pin networks panel");
     panelPin?.setAttribute("title", panelPinned ? "Unpin networks panel" : "Pin networks panel");
     if (panelPinIcon) panelPinIcon.src = panelPinned ? PIN_ICON_ON_SRC : PIN_ICON_OFF_SRC;
-    if (dropdownMenu && !dropdownMenu.hidden) root.requestAnimationFrame(() => positionPanel(panelAnchorPill || getActivePill()));
+    if (dropdownMenu && !dropdownMenu.hidden) schedulePanelPresentationSync();
     else if (!panelPinned) setFloatingHost();
     updatePanelSafeArea();
   }
@@ -594,13 +801,26 @@ function initHexMapNetworkController(root) {
   function syncPanelForActiveScope() {
     if (panelPinned && dropdownMenu && !dropdownMenu.hidden) {
       panelAnchorPill = getActivePill();
-      pills.forEach((pill) => pill.setAttribute("aria-expanded", String(pill === panelAnchorPill)));
-      root.requestAnimationFrame(() => positionPanel(panelAnchorPill));
+      syncPanelTriggerState();
+      schedulePanelPresentationSync();
     } else {
       setPanelOpen(false);
     }
     updateDropdownState();
-    root.requestAnimationFrame(updatePanelSafeArea);
+    schedulePanelPresentationSync();
+  }
+
+  function syncPanelForResponsiveChange() {
+    if (dropdownMenu && !dropdownMenu.hidden && !panelPinned) {
+      setPanelOpen(false);
+      return;
+    }
+    if (dropdownMenu && !dropdownMenu.hidden) {
+      panelAnchorPill = getActivePill();
+      schedulePanelPresentationSync();
+    } else {
+      updatePanelSafeArea();
+    }
   }
 
   pills.forEach((pill) => pill.addEventListener("click", () => {
@@ -610,23 +830,36 @@ function initHexMapNetworkController(root) {
     updateDropdownState();
   }));
   panelPin?.addEventListener("click", () => setPanelPinned(!panelPinned));
+  panelClose?.addEventListener("click", () => setPanelOpen(false, null, { restoreFocus: true }));
   document.addEventListener("mousedown", (event) => {
-    if (panelPinned || !dropdownMenu || dropdownMenu.hidden) return;
+    if ((panelPinned && !isMobileInlinePresentation()) || !dropdownMenu || dropdownMenu.hidden) return;
     if (pills.some((pill) => pill.contains(event.target)) || dropdownMenu.contains(event.target)) return;
     setPanelOpen(false);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !panelPinned) setPanelOpen(false);
+    if (event.key === "Escape" && dropdownMenu && !dropdownMenu.hidden
+        && (!panelPinned || isMobileInlinePresentation())) {
+      event.preventDefault();
+      setPanelOpen(false, null, { restoreFocus: true });
+    }
   });
   root.addEventListener("resize", () => {
     cachedPanelWidth = 0;
-    if (dropdownMenu && !dropdownMenu.hidden && !panelPinned) positionPanel(panelAnchorPill || getActivePill());
-    updatePanelSafeArea();
+    schedulePanelPresentationSync();
   });
   root.addEventListener("scroll", () => {
-    if (dropdownMenu && !dropdownMenu.hidden && !panelPinned) positionPanel(panelAnchorPill || getActivePill());
+    if (dropdownMenu && !dropdownMenu.hidden) schedulePanelPresentationSync();
   }, { passive: true });
-  root.addEventListener("crregionchange", () => root.requestAnimationFrame(updatePanelSafeArea));
+  root.addEventListener("crregionchange", schedulePanelPresentationSync);
+  root.addEventListener("hexpagemodechange", schedulePanelPresentationSync);
+  root.addEventListener("hexsensorlistpresentationchange", schedulePanelPresentationSync);
+  if (mobileLayoutQuery) {
+    if (typeof mobileLayoutQuery.addEventListener === "function") {
+      mobileLayoutQuery.addEventListener("change", syncPanelForResponsiveChange);
+    } else if (typeof mobileLayoutQuery.addListener === "function") {
+      mobileLayoutQuery.addListener(syncPanelForResponsiveChange);
+    }
+  }
 
   persistSelection();
   syncSelectionUi();
@@ -639,6 +872,11 @@ function initHexMapNetworkController(root) {
     getCatalogByCodeMap,
     getSelection: selectionSnapshot,
     getSelectedEntries: selectedEntries,
+    getEffectiveSelectedEntries: effectiveSelectedEntries,
+    getPollutantCapability: capabilitySnapshot,
+    supportsPollutant,
+    updatePollutantCapability,
+    setActivePollutant,
     setSelection,
     registerScope,
     updateScope,

@@ -1,5 +1,6 @@
 // Page-lifetime Hex Map search controller for UK and countries/regions.
 import coordinator from "./hex-map-coordinator.js";
+import { formatRegionDisplayName } from "../shared/domain/regions-module.js";
 
 function initHexMapSearch(root) {
   "use strict";
@@ -45,7 +46,7 @@ function initHexMapSearch(root) {
   const MAX_LIMIT = 10;
   const POSTCODE_DEBOUNCE_MS = 250;
   const LOCAL_SEARCH_MIN_CHARS = 1;
-  const MOBILE_BREAKPOINT_QUERY = "(max-width: 720px)";
+  const MOBILE_BREAKPOINT_QUERY = "(max-width: 767px)";
   const POSTCODE_PREFIX_HINTS_URL = "/api/aq/postcode_prefix_hints";
 
   let prefixHintsCache = null;
@@ -208,6 +209,19 @@ function initHexMapSearch(root) {
       return "SENSOR";
     }
     return "RESULT";
+  }
+
+  function getResultGroup(result) {
+    const group = result?.group || result?.kind;
+    return group === "postcode_hint" ? "postcode" : group;
+  }
+
+  function getResultGroupLabel(group) {
+    if (group === "postcode") return "POSTCODES";
+    if (group === "sensor") return "SENSORS";
+    if (group === "constituency") return "CONSTITUENCIES";
+    if (group === "local_authority") return "LOCAL AUTHORITIES";
+    return "RESULTS";
   }
 
   function isMobileSearch() {
@@ -471,7 +485,7 @@ function initHexMapSearch(root) {
         type_label: getResultTypeLabel("constituency"),
         code,
         primary: name,
-        secondary: row.region || "",
+        secondary: formatRegionDisplayName(row.region || ""),
         _nameNorm: normalizeText(name),
         _searchNorm: normalizeText(name),
       };
@@ -494,7 +508,7 @@ function initHexMapSearch(root) {
         code,
         region_name: regionName || null,
         primary: name,
-        secondary: regionName || "",
+        secondary: formatRegionDisplayName(regionName || ""),
         _nameNorm: normalizeText(name),
         _searchNorm: normalizeText(`${name} ${regionName}`),
       };
@@ -596,6 +610,8 @@ function initHexMapSearch(root) {
 
   function buildResultMarkup(result, index, isActive, context) {
     const activeClass = isActive ? " is-active" : "";
+    const resultGroup = getResultGroup(result);
+    const groupClass = resultGroup ? ` map-search-result--${resultGroup.replace(/_/g, "-")}` : "";
     const noDataFill = getComputedStyle(document.documentElement).getPropertyValue("--no-data").trim() || "#efe6d8";
     const kind = context?.kind || "uk";
     const getSensorColor = context?.getSensorColor || (() => null);
@@ -646,7 +662,7 @@ function initHexMapSearch(root) {
       }
       const rec = lookupDestRecord(code);
       const destName = rec?.name || (code ? escapeHtml(code) : "");
-      const destRegion = kind === "cr" ? (rec?.region_name || "") : (rec?.region || "");
+      const destRegion = formatRegionDisplayName(kind === "cr" ? (rec?.region_name || "") : (rec?.region || ""));
       const nameHtml = destName ? `<div class="map-search-result-dest-name">${escapeHtml(destName)}</div>` : "";
       const regionHtml = destRegion ? `<div class="map-search-result-dest-region">${escapeHtml(destRegion)}</div>` : "";
       const textHtml = (nameHtml || regionHtml) ? `<span class="map-search-result-dest-text">${nameHtml}${regionHtml}</span>` : "";
@@ -706,11 +722,12 @@ function initHexMapSearch(root) {
           : (fallbackLabel ? `<div class="map-search-result-dest-name">${escapeHtml(fallbackLabel)}</div>` : "");
         const regionHtml = (areaName && postTown) ? `<div class="map-search-result-dest-region">${escapeHtml(postTown)}</div>` : "";
         const textHtml = (nameHtml || regionHtml) ? `<span class="map-search-result-dest-text">${nameHtml}${regionHtml}</span>` : "";
-        destHtml = `<span class="map-search-result-dest">${hexSvgStr}${textHtml}<span class="map-search-result-arrow">${makeArrowSvg()}</span></span>`;
+        const noHexClass = hexSvgStr ? "" : " has-no-hex";
+        destHtml = `<span class="map-search-result-dest${noHexClass}">${hexSvgStr}${textHtml}<span class="map-search-result-arrow">${makeArrowSvg()}</span></span>`;
       }
     }
 
-    return `<button type="button" class="map-search-result${activeClass}" role="option" aria-selected="${isActive ? "true" : "false"}" data-result-index="${index}">${typeHtml}${copyHtml}${destHtml}</button>`;
+    return `<button type="button" class="map-search-result${groupClass}${activeClass}" role="option" aria-selected="${isActive ? "true" : "false"}" data-result-index="${index}">${typeHtml}${copyHtml}${destHtml}</button>`;
   }
 
   function getPlaceholder(kind) {
@@ -754,6 +771,88 @@ function initHexMapSearch(root) {
       inputEl.placeholder = getPlaceholder(kind);
     }
 
+    const SELECTION_VIEW_INITIAL_DELAY_MS = 360;
+    const SELECTION_VIEW_RETRY_MS = 100;
+    const SELECTION_VIEW_MAX_ATTEMPTS = 12;
+    let selectionViewTimerId = null;
+
+    function frameSelectedHexAndFirstSensor(attempt = 0) {
+      const panelId = kind === "cr" ? "cr-map-inline-sensor-panel" : "map-inline-sensor-panel";
+      const tableBodyId = kind === "cr" ? "cr-sensor-table-body" : "sensor-table-body";
+      const panel = document.getElementById(panelId);
+      const canvasWrap = panel?.closest(".map-canvas-wrap") || null;
+      const selectedHex = canvasWrap?.querySelector(".hex.is-selected") || null;
+      const firstSensor = document.getElementById(tableBodyId)
+        ?.querySelector("tr:not(.sensor-row-divider)") || null;
+
+      if (
+        !canvasWrap?.classList.contains("hex-selected")
+        || !selectedHex
+        || !firstSensor
+      ) {
+        if (attempt < SELECTION_VIEW_MAX_ATTEMPTS) {
+          window.setTimeout(
+            () => frameSelectedHexAndFirstSensor(attempt + 1),
+            SELECTION_VIEW_RETRY_MS,
+          );
+        }
+        return;
+      }
+
+      const hexRect = selectedHex.getBoundingClientRect();
+      const firstSensorRect = firstSensor.getBoundingClientRect();
+      if (!hexRect.height || !firstSensorRect.height) {
+        if (attempt < SELECTION_VIEW_MAX_ATTEMPTS) {
+          window.setTimeout(
+            () => frameSelectedHexAndFirstSensor(attempt + 1),
+            SELECTION_VIEW_RETRY_MS,
+          );
+        }
+        return;
+      }
+
+      const visualViewport = window.visualViewport;
+      const viewportTop = visualViewport?.offsetTop || 0;
+      const viewportHeight = visualViewport?.height
+        || window.innerHeight
+        || document.documentElement.clientHeight;
+      const visibleTop = viewportTop + 12;
+      const visibleBottom = viewportTop + viewportHeight - 12;
+      const minimumDelta = firstSensorRect.bottom - visibleBottom;
+      const maximumDelta = hexRect.top - visibleTop;
+
+      let deltaY = 0;
+      if (minimumDelta <= maximumDelta) {
+        // The whole selected hex and first sensor fit. Move only if needed.
+        deltaY = Math.min(maximumDelta, Math.max(minimumDelta, 0));
+      } else {
+        // On a very short viewport, prioritise showing the first sensor while
+        // retaining as much of the selected hex as the available height allows.
+        deltaY = minimumDelta;
+      }
+
+      if (Math.abs(deltaY) < 1) {
+        return;
+      }
+
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+      window.scrollBy({
+        top: deltaY,
+        left: 0,
+        behavior: reduceMotion ? "auto" : "smooth",
+      });
+    }
+
+    function scheduleSelectionViewFrame() {
+      if (selectionViewTimerId) {
+        window.clearTimeout(selectionViewTimerId);
+      }
+      selectionViewTimerId = window.setTimeout(() => {
+        selectionViewTimerId = null;
+        window.requestAnimationFrame(() => frameSelectedHexAndFirstSensor());
+      }, SELECTION_VIEW_INITIAL_DELAY_MS);
+    }
+
     function setActiveIndex(nextIndex, { scrollIntoView = false } = {}) {
       if (!Number.isFinite(nextIndex) || nextIndex < 0 || nextIndex >= state.results.length) {
         state.activeIndex = -1;
@@ -792,7 +891,15 @@ function initHexMapSearch(root) {
         closeResults();
         return;
       }
-      const rows = state.results.map((result, index) => buildResultMarkup(result, index, index === state.activeIndex, context));
+      let previousGroup = null;
+      const rows = state.results.map((result, index) => {
+        const resultGroup = getResultGroup(result);
+        const groupHeading = resultGroup !== previousGroup
+          ? `<div class="map-search-results-group-heading" aria-hidden="true">${escapeHtml(getResultGroupLabel(resultGroup))}</div>`
+          : "";
+        previousGroup = resultGroup;
+        return `${groupHeading}${buildResultMarkup(result, index, index === state.activeIndex, context)}`;
+      });
       const destinationHeader = hasRows
         ? `<div class="map-search-results-header" aria-hidden="true"><span></span><span></span><span class="map-search-results-dest-header">${escapeHtml(kind === "cr" ? "Local Authority" : "Constituency")}</span></div>`
         : "";
@@ -948,18 +1055,26 @@ function initHexMapSearch(root) {
       }
       if (result.kind === "postcode") {
         await runPostcodeLookupResult(result);
+        inputEl.blur();
+        scheduleSelectionViewFrame();
         return;
       }
       if (result.kind === "constituency") {
         await selectConstituencyResult(result);
+        inputEl.blur();
+        scheduleSelectionViewFrame();
         return;
       }
       if (result.kind === "local_authority") {
         await selectLocalAuthorityResult(result);
+        inputEl.blur();
+        scheduleSelectionViewFrame();
         return;
       }
       if (result.kind === "sensor") {
         await selectSensorResult(result);
+        inputEl.blur();
+        scheduleSelectionViewFrame();
       }
     }
 

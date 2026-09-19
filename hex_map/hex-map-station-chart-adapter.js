@@ -10,6 +10,7 @@
 
   if (!domain) throw new Error("UkAqStationChartDomain is required");
   const MAX_SELECTED_SENSORS = 4;
+  const FOUR_COLUMN_PLOT_THRESHOLD = 960;
   const DAY_MS = 24 * 60 * 60 * 1000;
   const RANGE_VALUES = new Set(["12h", "24h", "7d", "31d", "90d"]);
 
@@ -99,16 +100,30 @@
     return RANGE_VALUES.has(label) ? label : "24h";
   }
 
-  function resolveRange(label) {
-    const endDate = new Date();
+  function entryHourKey(entry) {
+    const raw = entry?.timestamp;
+    if (!raw) return null;
+    const timestamp = raw instanceof Date ? raw : new Date(raw);
+    return Number.isFinite(timestamp.getTime())
+      ? Math.floor(timestamp.getTime() / domain.HOUR_MS) * domain.HOUR_MS
+      : null;
+  }
+
+  function resolveRange(label, entries = [], now = new Date()) {
+    const nowDate = now instanceof Date ? new Date(now.getTime()) : new Date(now);
+    const nowMs = Number.isFinite(nowDate.getTime()) ? nowDate.getTime() : Date.now();
+    const currentHourMs = Math.floor(nowMs / domain.HOUR_MS) * domain.HOUR_MS;
+    const hasCurrentHourData = (Array.isArray(entries) ? entries : [])
+      .some((entry) => entryHourKey(entry) === currentHourMs);
+    const endMs = currentHourMs - (hasCurrentHourData ? 0 : domain.HOUR_MS);
     const duration = label === "12h" ? 12 * 60 * 60 * 1000
       : label === "7d" ? 7 * DAY_MS
         : label === "31d" ? 31 * DAY_MS
           : label === "90d" ? 90 * DAY_MS
             : DAY_MS;
     return domain.snapshotChartRange({
-      start_utc: new Date(endDate.getTime() - duration).toISOString(),
-      end_utc: endDate.toISOString(),
+      start_utc: new Date(endMs - duration).toISOString(),
+      end_utc: new Date(endMs).toISOString(),
     });
   }
 
@@ -188,8 +203,11 @@
       }),
     });
 
-    const backButton = root.document.getElementById("chart-back-to-map");
+    const backButtons = Array.from(root.document.querySelectorAll("[data-chart-back-to-map]"));
     const rangeSelect = root.document.getElementById("hex-chart-window-toolbar");
+    const narrowChipLayoutQuery = typeof root.matchMedia === "function"
+      ? root.matchMedia("(max-width: 767px)")
+      : null;
     const domByMap = Object.fromEntries(["uk", "cr"].map((key) => {
       const panel = root.document.getElementById(`${key}-hex-chart-mode`);
       return [key, {
@@ -214,6 +232,11 @@
       pollutantContextController: null,
       pollutantAdapter: null,
     };
+    let chipIdentityFrame = null;
+    let chipMeasureContext = null;
+    const chipIdentityResizeObserver = typeof root.ResizeObserver === "function"
+      ? new root.ResizeObserver(() => scheduleChipNetworkIdentity())
+      : null;
 
     function chartMapKey() { return pageMode.getState().chartMapKey; }
     function isLifecycleMounted(mapKey = null) {
@@ -225,6 +248,199 @@
     function selectedEntries() {
       const visible = new Map(state.visibleEntries.map((entry) => [entry.station_id, entry]));
       return Array.from(state.selectedIds).map((id) => visible.get(id) || state.retainedEntries.get(id)).filter(Boolean);
+    }
+
+    function scheduleChipNetworkIdentity() {
+      if (chipIdentityFrame !== null) root.cancelAnimationFrame?.(chipIdentityFrame);
+      const render = () => {
+        chipIdentityFrame = null;
+        syncChipNetworkIdentity();
+      };
+      chipIdentityFrame = typeof root.requestAnimationFrame === "function"
+        ? root.requestAnimationFrame(render)
+        : (render(), null);
+    }
+
+    function currentPlotGeometry() {
+      const refs = dom();
+      const frame = state.renderer?.frame;
+      const range = frame?.xScale?.range?.();
+      if (frame && Array.isArray(range) && range.length >= 2) {
+        const plotLeft = Number(range[0]);
+        const plotRight = Number(range[1]);
+        if (Number.isFinite(plotLeft) && Number.isFinite(plotRight) && plotRight >= plotLeft) {
+          return {
+            left: plotLeft,
+            right: Math.max(0, Number(frame.width) - plotRight),
+            width: plotRight - plotLeft,
+          };
+        }
+      }
+      const chartWidth = refs?.wrap?.getBoundingClientRect?.().width || refs?.svg?.clientWidth || 0;
+      const chartHeight = refs?.wrap?.getBoundingClientRect?.().height || refs?.svg?.clientHeight || 0;
+      const margin = root.UkAqStationChartRenderer?.chartMargins?.(chartWidth, chartHeight);
+      if (!margin || !chartWidth) return null;
+      return {
+        left: Number(margin.left) || 0,
+        right: Number(margin.right) || 0,
+        width: Math.max(0, chartWidth - (Number(margin.left) || 0) - (Number(margin.right) || 0)),
+      };
+    }
+
+    function textWidth(element, text) {
+      if (!element || typeof root.getComputedStyle !== "function") return Infinity;
+      chipMeasureContext ||= root.document.createElement("canvas").getContext("2d");
+      if (!chipMeasureContext) return Infinity;
+      const style = root.getComputedStyle(element);
+      chipMeasureContext.font = style.font || `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      return chipMeasureContext.measureText(String(text || "")).width;
+    }
+
+    function separatorWidth(element) {
+      if (!element || typeof root.getComputedStyle !== "function") return 0;
+      const style = root.getComputedStyle(element);
+      return textWidth(element, "·")
+        + (Number.parseFloat(style.marginLeft) || 0)
+        + (Number.parseFloat(style.marginRight) || 0);
+    }
+
+    function splitSensorName(sensorName, firstLineWidth, measureElement) {
+      const tokens = String(sensorName || "").trim().split(/\s+/u).filter(Boolean);
+      let lineOneTokenCount = 0;
+      while (lineOneTokenCount < tokens.length) {
+        const candidate = tokens.slice(0, lineOneTokenCount + 1).join(" ");
+        if (textWidth(measureElement, candidate) > firstLineWidth) break;
+        lineOneTokenCount += 1;
+      }
+      return {
+        first: tokens.slice(0, lineOneTokenCount).join(" "),
+        continuation: tokens.slice(lineOneTokenCount).join(" "),
+      };
+    }
+
+    function longestFittingPrefix(text, availableWidth, measureElement) {
+      const characters = Array.from(String(text || ""));
+      let longest = "";
+      for (let index = 1; index <= characters.length; index += 1) {
+        const candidate = characters.slice(0, index).join("").trimEnd();
+        if (textWidth(measureElement, candidate) <= availableWidth) longest = candidate;
+      }
+      return longest;
+    }
+
+    function setIdentityPiece(element, text, visible = true) {
+      if (!element) return;
+      const nextText = String(text || "");
+      if (element.textContent !== nextText) element.textContent = nextText;
+      element.hidden = !visible;
+    }
+
+    function applyOneLineIdentity(chip) {
+      const sensorName = String(chip.dataset.sensorName || "");
+      const networkName = String(chip.dataset.networkName || "");
+      const lineOne = chip.querySelector(".hex-chart-chip-line--1");
+      const lineTwo = chip.querySelector(".hex-chart-chip-line--2");
+      setIdentityPiece(lineOne?.querySelector(".hex-chart-chip-name"), sensorName);
+      setIdentityPiece(lineOne?.querySelector(".hex-chart-chip-separator"), "·");
+      setIdentityPiece(lineOne?.querySelector(".hex-chart-chip-network"), networkName);
+      if (lineTwo) lineTwo.hidden = true;
+      chip.classList.remove("hex-chart-selected-sensor-chip--truncated");
+    }
+
+    function applyTwoLineIdentity(chip) {
+      const sensorName = String(chip.dataset.sensorName || "");
+      const networkName = String(chip.dataset.networkName || "");
+      const label = chip.querySelector(".hex-chart-chip-label");
+      const lineOne = chip.querySelector(".hex-chart-chip-line--1");
+      const lineTwo = chip.querySelector(".hex-chart-chip-line--2");
+      const firstSensor = lineOne?.querySelector(".hex-chart-chip-name");
+      const firstSeparator = lineOne?.querySelector(".hex-chart-chip-separator");
+      const firstNetwork = lineOne?.querySelector(".hex-chart-chip-network");
+      const continuation = lineTwo?.querySelector(".hex-chart-chip-name");
+      const secondSeparator = lineTwo?.querySelector(".hex-chart-chip-separator");
+      const secondNetwork = lineTwo?.querySelector(".hex-chart-chip-network");
+      if (!label || !firstSensor || !lineTwo || !continuation || !secondSeparator || !secondNetwork) return;
+      lineTwo.hidden = false;
+      setIdentityPiece(firstSeparator, "", false);
+      setIdentityPiece(firstNetwork, "", false);
+      setIdentityPiece(secondNetwork, networkName);
+      const availableWidth = label.getBoundingClientRect().width;
+      if (textWidth(firstSensor, sensorName) <= availableWidth + 1) {
+        setIdentityPiece(firstSensor, sensorName);
+        setIdentityPiece(continuation, "", false);
+        setIdentityPiece(secondSeparator, "", false);
+        chip.classList.remove("hex-chart-selected-sensor-chip--truncated");
+        return;
+      }
+      const availableContinuationWidth = Math.max(
+        0,
+        availableWidth - separatorWidth(secondSeparator) - textWidth(secondNetwork, networkName),
+      );
+      const split = splitSensorName(sensorName, availableWidth, firstSensor);
+      setIdentityPiece(firstSensor, split.first);
+      setIdentityPiece(secondSeparator, "·");
+      if (textWidth(continuation, split.continuation) <= availableContinuationWidth) {
+        setIdentityPiece(continuation, split.continuation);
+        chip.classList.remove("hex-chart-selected-sensor-chip--truncated");
+        return;
+      }
+      const ellipsisWidth = textWidth(continuation, "…");
+      const sensorPrefixWidth = Math.max(0, availableContinuationWidth - ellipsisWidth);
+      const visiblePrefix = longestFittingPrefix(split.continuation, sensorPrefixWidth, continuation);
+      setIdentityPiece(continuation, `${visiblePrefix}…`);
+      chip.classList.add("hex-chart-selected-sensor-chip--truncated");
+    }
+
+    function oneLineIdentityFits(chip) {
+      const label = chip.querySelector(".hex-chart-chip-label");
+      const sensor = chip.querySelector(".hex-chart-chip-line--1 .hex-chart-chip-name");
+      const separator = chip.querySelector(".hex-chart-chip-line--1 .hex-chart-chip-separator");
+      const network = chip.querySelector(".hex-chart-chip-line--1 .hex-chart-chip-network");
+      if (!label || !sensor || !separator || !network) return false;
+      return textWidth(sensor, chip.dataset.sensorName)
+        + separatorWidth(separator)
+        + textWidth(network, chip.dataset.networkName)
+        <= label.getBoundingClientRect().width + 1;
+    }
+
+    function syncChipNetworkIdentity() {
+      const reading = dom()?.reading;
+      if (!reading) return;
+      const plot = currentPlotGeometry();
+      if (plot) {
+        reading.style.setProperty("--hex-chart-plot-left", `${plot.left}px`);
+        reading.style.setProperty("--hex-chart-plot-right", `${plot.right}px`);
+      }
+      const isNarrow = Boolean(narrowChipLayoutQuery?.matches);
+      const fourColumns = !isNarrow && Boolean(plot && plot.width >= FOUR_COLUMN_PLOT_THRESHOLD);
+      reading.classList.remove(
+        "hex-chart-selected-sensors--one-line",
+        "hex-chart-selected-sensors--two-line",
+        "hex-chart-selected-sensors--four-columns",
+      );
+      reading.classList.toggle("hex-chart-selected-sensors--four-columns", fourColumns);
+      const chips = Array.from(reading.querySelectorAll(".hex-chart-selected-sensor-chip"));
+      if (isNarrow) {
+        const allFit = chips.length > 0 && chips.every(oneLineIdentityFits);
+        reading.classList.add(allFit ? "hex-chart-selected-sensors--one-line" : "hex-chart-selected-sensors--two-line");
+        chips.forEach(allFit ? applyOneLineIdentity : applyTwoLineIdentity);
+      } else {
+        reading.classList.add("hex-chart-selected-sensors--two-line");
+        chips.forEach(applyTwoLineIdentity);
+      }
+      const canvas = reading.closest(".map-canvas-wrap");
+      canvas?.style.setProperty(
+        "--hex-chart-summary-extra-height",
+        !isNarrow && !fourColumns ? "48px" : "0px",
+      );
+    }
+
+    function clearChipPresentationGeometry() {
+      Object.values(domByMap).forEach(({ reading }) => {
+        reading?.closest(".map-canvas-wrap")?.style.removeProperty("--hex-chart-summary-extra-height");
+        reading?.style.removeProperty("--hex-chart-plot-left");
+        reading?.style.removeProperty("--hex-chart-plot-right");
+      });
     }
     function setMessage(text, options = {}) {
       const element = dom()?.message;
@@ -251,9 +467,14 @@
     }
 
     function stationContext(load, status) {
+      const selectedIds = new Set((load.selectedStationIds || []).map((stationId) => String(stationId)));
+      const rangeEntries = status === "ready"
+        ? (load.entries || []).filter((entry) => selectedIds.has(String(entry?.station_id ?? entry?.stationId ?? "")))
+        : [];
       return {
         pollutant: load.pollutant,
         status,
+        range: status === "ready" ? resolveRange(state.rangeLabel, rangeEntries) : undefined,
         entries: status === "ready" ? load.entries : [],
         selectedStationIds: load.selectedStationIds,
         primaryStationId: load.primaryStationId,
@@ -274,7 +495,7 @@
       state.aqiSourceId = state.selectedIds.has(load.aqiSourceStationId)
         ? load.aqiSourceStationId
         : selected[0]?.station_id || null;
-      renderChips(context);
+      renderChips();
       syncTable(chartMapKey());
       notifySelection();
     }
@@ -329,12 +550,25 @@
       });
       const refs = domByMap[mapKey];
       state.controller.mount({ svg: refs.svg, tooltip: refs.tooltip, wrap: refs.wrap });
+      chipIdentityResizeObserver?.observe(refs.wrap);
       createPollutantHandoff();
     }
 
     function syncChartSelectionTables() {
       syncTable("uk");
       syncTable("cr");
+    }
+
+    let scheduledSensorPanelGeometryMapKey = null;
+    function scheduleSensorPanelGeometryRefresh(mapKey) {
+      if (mapKey !== "uk" && mapKey !== "cr") return;
+      if (scheduledSensorPanelGeometryMapKey === mapKey) return;
+      scheduledSensorPanelGeometryMapKey = mapKey;
+      root.requestAnimationFrame(() => {
+        if (scheduledSensorPanelGeometryMapKey !== mapKey) return;
+        scheduledSensorPanelGeometryMapKey = null;
+        mapAdapter(mapKey)?.refreshSensorPanelGeometry?.();
+      });
     }
 
     function renderPageModeAndTables() {
@@ -344,8 +578,16 @@
 
     function tableRefs(mapKey) {
       return mapKey === "cr"
-        ? { wrap: root.document.getElementById("cr-sensor-table-wrap"), body: root.document.getElementById("cr-sensor-table-body") }
-        : { wrap: root.document.getElementById("sensor-table-wrap"), body: root.document.getElementById("sensor-table-body") };
+        ? {
+          wrap: root.document.getElementById("cr-sensor-table-wrap"),
+          body: root.document.getElementById("cr-sensor-table-body"),
+          panelBody: root.document.getElementById("cr-sensor-panel-body"),
+        }
+        : {
+          wrap: root.document.getElementById("sensor-table-wrap"),
+          body: root.document.getElementById("sensor-table-body"),
+          panelBody: root.document.getElementById("sensor-panel-body"),
+        };
     }
 
     function orderedVisibleIds(mapKey = chartMapKey()) {
@@ -374,37 +616,41 @@
         row.classList.toggle("is-selected", isSelected);
         if (!active) {
           selectCell.innerHTML = "";
-          symbolCell.innerHTML = id ? `<button type="button" class="sensor-chart-launch" data-station-id="${escapeHtml(id)}" aria-label="Open chart for ${escapeHtml(name.textContent.trim())}" title="Open chart"><img src="/images/UK-AQ-Sensor-Buttons-chart.svg" alt="" aria-hidden="true" /></button>` : "";
+          symbolCell.innerHTML = id
+            ? `<button type="button" class="sensor-chart-launch" data-station-id="${escapeHtml(id)}" aria-label="Open chart for ${escapeHtml(name.textContent.trim())}" title="Open chart"><img src="/images/UK-AQ-Sensor-Buttons-chart.svg" alt="" aria-hidden="true"></button>`
+            : "";
           return;
         }
-        const index = Math.max(0, selected.indexOf(id));
+        const index = selected.indexOf(id);
         selectCell.innerHTML = `<button type="button" class="hex-chart-selector" data-station-id="${escapeHtml(id)}" aria-label="${isSelected ? "Remove" : "Add"} ${escapeHtml(name.textContent.trim())} from chart" aria-pressed="${isSelected ? "true" : "false"}"></button>`;
-        symbolCell.innerHTML = root.ChartCore.getSymbolSvgMarkup(index, { className: "hex-chart-symbol-svg chart-mode-sensor-symbol-svg", sizePx: 28, area: 160 });
+        symbolCell.innerHTML = isSelected
+          ? root.ChartCore.getSymbolSvgMarkup(index, { className: "hex-chart-symbol-svg chart-mode-sensor-symbol-svg", sizePx: 28, area: 160 })
+          : "";
       });
+      root.UkAqHexMapTruncation?.refresh?.(refs.body);
       const ordered = active ? orderedVisibleIds(mapKey) : [];
-      const selectFill = refs.wrap.querySelector(".hex-chart-selector[data-chart-header-action='select-fill']");
-      const keepTop = refs.wrap.querySelector(".hex-chart-selector[data-chart-header-action='keep-top']");
+      const controlsRoot = refs.panelBody || refs.wrap;
+      const selectFill = controlsRoot?.querySelector(".hex-chart-selector[data-chart-header-action='select-fill']");
+      const keepTop = controlsRoot?.querySelector(".hex-chart-selector[data-chart-header-action='keep-top']");
       if (selectFill) selectFill.disabled = !active || state.selectedIds.size >= MAX_SELECTED_SENSORS || !ordered.some((id) => !state.selectedIds.has(id));
       if (keepTop) keepTop.disabled = !active || state.selectedIds.size <= 1 || !ordered.length;
     }
 
-    function renderChips(context = currentContext()) {
+    function renderChips() {
       const reading = dom()?.reading;
       if (!reading) return;
       const selected = selectedEntries();
-      const adapter = mapAdapter();
       reading.innerHTML = selected.map((entry, index) => {
         const id = entry.station_id;
         const stationName = String(entry.stationName || entry.station_name || "Unknown sensor");
         const network = String(entry.networkLabel || entry.network_label || "Unknown network");
-        const value = Number(entry.value);
-        const readingValue = Number.isFinite(value) ? `${value.toFixed(1)} ${entry.units || context?.units || ""}`.trim() : "No data";
-        const updated = entry.timestamp ? new Date(entry.timestamp).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }) : "--:--";
-        const colour = adapter?.getSensorCurrentColor?.(id) || "var(--no-data)";
         const source = id === state.aqiSourceId;
         const symbol = root.ChartCore.getSymbolSvgMarkup(index, { className: "hex-chart-symbol-svg chart-mode-sensor-symbol-svg", sizePx: 22, area: 120 });
-        return `<div class="hex-chart-selected-sensor-chip${source ? " is-aqi-source" : ""}" role="button" tabindex="0" data-aqi-source-station-id="${escapeHtml(id)}" aria-pressed="${source ? "true" : "false"}" aria-label="Use ${escapeHtml(stationName)} for DAQI and EAQI bands"><span class="hex-chart-chip-symbol">${symbol}</span><span class="hex-chart-chip-label"><span class="hex-chart-chip-name">${escapeHtml(stationName)}</span><span class="hex-chart-chip-network">· ${escapeHtml(network)}</span></span><span class="hex-chart-chip-value"><span class="sensor-reading-dot" style="--sensor-reading-color:${escapeHtml(colour)}"></span>${escapeHtml(readingValue)}</span><span class="hex-chart-chip-time">${escapeHtml(updated)}</span></div>`;
+        const fullIdentity = `${stationName} · ${network}`;
+        return `<div class="hex-chart-selected-sensor-chip${source ? " is-aqi-source" : ""}" role="button" tabindex="0" data-aqi-source-station-id="${escapeHtml(id)}" data-sensor-name="${escapeHtml(stationName)}" data-network-name="${escapeHtml(network)}" aria-pressed="${source ? "true" : "false"}" aria-label="Use ${escapeHtml(fullIdentity)} for DAQI and EAQI bands" title="${escapeHtml(fullIdentity)}"><span class="hex-chart-chip-symbol">${symbol}</span><span class="hex-chart-chip-label" aria-hidden="true"><span class="hex-chart-chip-line hex-chart-chip-line--1"><span class="hex-chart-chip-name">${escapeHtml(stationName)}</span><span class="hex-chart-chip-separator" hidden>·</span><span class="hex-chart-chip-network" hidden>${escapeHtml(network)}</span></span><span class="hex-chart-chip-line hex-chart-chip-line--2"><span class="hex-chart-chip-name" hidden></span><span class="hex-chart-chip-separator" hidden>·</span><span class="hex-chart-chip-network">${escapeHtml(network)}</span></span></span></div>`;
       }).join("");
+      chipIdentityResizeObserver?.observe(reading);
+      scheduleChipNetworkIdentity();
     }
 
     function notifySelection() {
@@ -418,12 +664,15 @@
     }
 
     function commitSelection(options = {}) {
-      selectedEntries().forEach((entry) => state.retainedEntries.set(entry.station_id, entry));
+      const entries = selectedEntries();
+      entries.forEach((entry) => state.retainedEntries.set(entry.station_id, entry));
       if (!state.selectedIds.has(state.aqiSourceId)) state.aqiSourceId = Array.from(state.selectedIds)[0] || null;
       renderChips();
       syncTable(chartMapKey());
       notifySelection();
-      return options.reload === false ? Promise.resolve() : state.controller?.setSelection(selectedEntries());
+      return options.reload === false ? Promise.resolve() : state.controller?.setSelection(entries, {
+        range: resolveRange(state.rangeLabel, entries),
+      });
     }
 
     function enter(options = {}) {
@@ -432,7 +681,7 @@
       const context = currentContext(mapKey);
       const identity = contextIdentity(mapKey, context);
       if (!identity) return false;
-      exit();
+      exit({ refreshSensorPanelGeometry: false });
       state.lifecycleMounted = true;
       state.sessionIdentity = identity;
       state.rangeLabel = "24h";
@@ -445,13 +694,14 @@
       if (rangeSelect) rangeSelect.value = state.rangeLabel;
       pageMode.enterChart(mapKey);
       syncChartSelectionTables();
+      scheduleSensorPanelGeometryRefresh(mapKey);
       createController(mapKey);
-      void state.controller.setRange(resolveRange(state.rangeLabel));
+      void state.controller.setRange(resolveRange(state.rangeLabel, selectedEntries()));
       state.pollutantAdapter.sync({ ...context, entries: state.visibleEntries }, context.dataStatus);
       return true;
     }
 
-    function exit() {
+    function exit(options = {}) {
       const previousMapKey = chartMapKey();
       state.pollutantAdapter?.destroy?.();
       state.pollutantContextController?.destroy?.();
@@ -466,9 +716,13 @@
       state.selectedIds = new Set();
       state.retainedEntries = new Map();
       state.aqiSourceId = null;
+      clearChipPresentationGeometry();
       pageMode.exitChart();
       syncChartSelectionTables();
       if (previousMapKey) syncTable(previousMapKey);
+      if (options.refreshSensorPanelGeometry !== false) {
+        scheduleSensorPanelGeometryRefresh(previousMapKey);
+      }
       notifySelection();
     }
 
@@ -529,7 +783,11 @@
       const normalizedContext = { ...context, entries: visibleEntries };
       const status = state.pollutantAdapter?.resolveStatus(normalizedContext, options.dataStatus);
       const pollutant = domain.normalizePollutant(normalizedContext.pollutant);
-      if (status !== "ready" || pollutant !== state.pollutantContextController?.renderedPollutant) {
+      if (
+        status !== "ready"
+        || pollutant !== state.pollutantContextController?.renderedPollutant
+        || state.pollutantContextController?.targetStatus !== "ready"
+      ) {
         return state.pollutantAdapter?.sync(normalizedContext, options.dataStatus) === true;
       }
       state.visibleEntries = visibleEntries;
@@ -552,7 +810,7 @@
       await mapAdapter()?.refreshForChartMode?.();
       const pollutant = domain.normalizePollutant(currentContext()?.pollutant);
       if (pollutant && pollutant === state.pollutantContextController?.renderedPollutant) {
-        await state.controller?.setRange(resolveRange(state.rangeLabel));
+        await state.controller?.setRange(resolveRange(state.rangeLabel, selectedEntries()));
       }
     }
 
@@ -560,12 +818,24 @@
       if (!isLifecycleMounted()) return;
       state.rangeLabel = normalizeRangeLabel(rangeSelect.value);
       rangeSelect.value = state.rangeLabel;
-      void state.controller?.setRange(resolveRange(state.rangeLabel));
+      void state.controller?.setRange(resolveRange(state.rangeLabel, selectedEntries()));
     });
-    backButton?.addEventListener("click", exit);
+    backButtons.forEach((button) => button.addEventListener("click", exit));
     root.addEventListener("resize", () => {
-      if (isLifecycleMounted()) state.controller?.resize({});
+      if (isLifecycleMounted()) {
+        state.controller?.resize({});
+        scheduleChipNetworkIdentity();
+      }
     });
+    if (narrowChipLayoutQuery) {
+      const handleNarrowChipLayoutChange = () => scheduleChipNetworkIdentity();
+      if (typeof narrowChipLayoutQuery.addEventListener === "function") {
+        narrowChipLayoutQuery.addEventListener("change", handleNarrowChipLayoutChange);
+      } else if (typeof narrowChipLayoutQuery.addListener === "function") {
+        narrowChipLayoutQuery.addListener(handleNarrowChipLayoutChange);
+      }
+    }
+    root.document.fonts?.ready?.then(() => scheduleChipNetworkIdentity());
     Object.values(domByMap).forEach((refs) => {
       refs.panel?.addEventListener("click", (event) => event.stopPropagation());
       const activateSource = (event) => {

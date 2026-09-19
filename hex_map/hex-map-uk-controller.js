@@ -4,6 +4,7 @@ import coordinator from "./hex-map-coordinator.js";
 import networkController from "./hex-map-network-controller.js";
 import summaryPresenter from "./hex-map-summary.js";
 import scrollAffordances from "./hex-map-scroll-affordances.js";
+import truncation from "./hex-map-truncation.js";
 import "./hex-map-station-chart-adapter-module.js";
 import search from "./hex-map-search.js";
 
@@ -251,6 +252,9 @@ function initHexMapUkController(root) {
         },
       ];
       const tooltip = document.getElementById("tooltip");
+      const mobileTooltipQuery = typeof root.matchMedia === "function"
+        ? root.matchMedia("(max-width: 767px)")
+        : null;
       const sensorDetailsSection = document.getElementById("sensor-details");
       const detailsTitle = document.getElementById("details-title");
       const detailsMeta = document.getElementById("details-meta");
@@ -296,13 +300,15 @@ function initHexMapUkController(root) {
       const colorScaleGroup = document.querySelector(".colour-scale-group");
       const colorScaleToggle = colorScaleGroup ? colorScaleGroup.querySelector(".colour-scale-toggle") : null;
       const networkPanel = document.querySelector(".network-panel");
-      const sortHeaders = detailsTableWrap
-        ? Array.from(detailsTableWrap.querySelectorAll("th[data-sort-key]"))
+      const sortHeaderButtons = detailsTableWrap
+        ? Array.from(detailsTableWrap.querySelectorAll("button.sort-header[data-sort-key]"))
         : [];
-      const sortHeaderButtons = sortHeaders
-        .map((header) => header.querySelector("button[data-sort-key]"))
-        .filter(Boolean);
-      const mapCanvasWrap = document.getElementById("map-inline-sensor-panel")?.closest(".map-canvas-wrap") || null;
+      const mobileSensorSortSelect = document.getElementById("sensor-mobile-sort");
+      const mobileSensorSortControl = mobileSensorSortSelect?.closest(".mobile-sensor-sort") || null;
+      const inlinePanel = document.getElementById("map-inline-sensor-panel");
+      const mapCanvasWrap = inlinePanel?.closest(".map-canvas-wrap") || null;
+      const inlinePanelHeader = inlinePanel?.querySelector(".sensor-panel-header") || null;
+      const detailsTableHead = detailsTableWrap?.querySelector("thead") || null;
       const inlinePanelClose = document.getElementById("sensor-panel-close");
       const inlinePanelWindowLabel = document.getElementById("sensor-panel-window-label");
       const inlinePanelTitle = document.getElementById("sensor-panel-title");
@@ -313,15 +319,16 @@ function initHexMapUkController(root) {
       const inlinePanelCount = document.getElementById("sensor-panel-count");
       const inlinePanelHexIcon = document.getElementById("sensor-panel-hex-icon");
       const inlinePanelBody = document.getElementById("sensor-panel-body");
+      const mobileSensorListToolbar = inlinePanelBody?.querySelector("[data-mobile-sensor-list-toolbar]") || null;
       const SENSOR_PANEL_EMPTY_HEIGHT = 116;
       const SENSOR_PANEL_HEADER_HEIGHT = 62;
       const SENSOR_TABLE_HEADER_HEIGHT = 44;
-      const SENSOR_PANEL_ROW_HEIGHT = 46;
-      const SENSOR_PANEL_MAX_VISIBLE_ROWS = 4;
+      const NARROW_SENSOR_ROWS = 3;
+      const DESKTOP_SENSOR_ROWS = 4;
       const detailScrollAffordances = scrollAffordances?.attachSensorTable?.(detailsTableWrap, {
         contentEl: detailsTableBody,
         isScrollbarHidden: () => !detailsTableWrap?.classList.contains("is-scroll-forced"),
-        trackOffsetTop: SENSOR_TABLE_HEADER_HEIGHT,
+        trackOffsetTop: () => mobileTooltipQuery?.matches ? 0 : SENSOR_TABLE_HEADER_HEIGHT,
       });
       const restoreDetailsScrollPosition = (nextKey, previousScrollTop) => {
         detailScrollAffordances?.restorePosition?.(nextKey, previousScrollTop);
@@ -339,10 +346,11 @@ function initHexMapUkController(root) {
           return;
         }
         const isChartModeActive = Boolean(window.hexChartMode?.isActive?.("uk"));
-        const isInteractive = chartLaunchAvailable && !isChartModeActive;
-        inlinePanelTitleLaunch?.setAttribute("data-chart-launch-available", isInteractive ? "true" : "false");
+        const chartEntryAvailable = chartLaunchAvailable && !isChartModeActive;
+        const isInteractive = chartEntryAvailable && !mobileTooltipQuery?.matches;
+        inlinePanelTitleLaunch?.setAttribute("data-chart-launch-available", chartEntryAvailable ? "true" : "false");
         if (inlinePanelLaunchButton) {
-          inlinePanelLaunchButton.disabled = !isInteractive;
+          inlinePanelLaunchButton.disabled = !chartEntryAvailable;
         }
         inlinePanelTitle.setAttribute("aria-disabled", isInteractive ? "false" : "true");
         if (!isInteractive) {
@@ -353,6 +361,13 @@ function initHexMapUkController(root) {
         inlinePanelTitle.setAttribute("role", "button");
         inlinePanelTitle.setAttribute("tabindex", "0");
       };
+      if (mobileTooltipQuery) {
+        if (typeof mobileTooltipQuery.addEventListener === "function") {
+          mobileTooltipQuery.addEventListener("change", syncInlinePanelTitleInteractivity);
+        } else if (typeof mobileTooltipQuery.addListener === "function") {
+          mobileTooltipQuery.addListener(syncInlinePanelTitleInteractivity);
+        }
+      }
       if (inlinePanelClose) {
         inlinePanelClose.addEventListener("click", () => {
           if (window.hexChartMode?.isActive?.("uk")) {
@@ -388,27 +403,13 @@ function initHexMapUkController(root) {
         }
       });
       syncInlinePanelTitleInteractivity();
-      if (detailsTableWrap) {
-        detailsTableWrap.addEventListener("click", (event) => {
-          const launchButton = event.target instanceof Element
-            ? event.target.closest(".sensor-chart-launch[data-station-id]")
-            : null;
-          if (launchButton && detailsTableWrap.contains(launchButton)) {
-            event.stopPropagation();
-            const stationId = String(launchButton.dataset.stationId || "").trim();
-            if (!stationId || window.hexChartMode?.isActive?.("uk")) {
-              return;
-            }
-            window.hexChartMode?.enter?.({
-              mapKey: "uk",
-              initialSensorId: stationId,
-            });
-            return;
-          }
+      const sensorPanelInteractionRoot = inlinePanel || detailsTableWrap;
+      if (sensorPanelInteractionRoot) {
+        sensorPanelInteractionRoot.addEventListener("click", (event) => {
           const selectorHeaderButton = event.target instanceof Element
             ? event.target.closest(".hex-chart-selector[data-chart-header-action]")
             : null;
-          if (selectorHeaderButton && detailsTableWrap.contains(selectorHeaderButton)) {
+          if (selectorHeaderButton && sensorPanelInteractionRoot.contains(selectorHeaderButton)) {
             event.stopPropagation();
             const action = String(selectorHeaderButton.getAttribute("data-chart-header-action") || "").trim();
             if (!action) {
@@ -422,7 +423,7 @@ function initHexMapUkController(root) {
           const selectorButton = event.target instanceof Element
             ? event.target.closest(".hex-chart-selector[data-station-id]")
             : null;
-          if (selectorButton && detailsTableWrap.contains(selectorButton)) {
+          if (selectorButton && detailsTableWrap?.contains(selectorButton)) {
             event.stopPropagation();
             const stationId = String(selectorButton.dataset.stationId || "").trim();
             if (!stationId) {
@@ -433,10 +434,25 @@ function initHexMapUkController(root) {
             }
             return;
           }
+          const launchButton = event.target instanceof Element
+            ? event.target.closest(".sensor-chart-launch[data-station-id]")
+            : null;
+          if (launchButton && detailsTableWrap?.contains(launchButton)) {
+            event.stopPropagation();
+            const stationId = String(launchButton.dataset.stationId || "").trim();
+            if (!stationId || window.hexChartMode?.isActive?.("uk")) {
+              return;
+            }
+            window.hexChartMode?.enter?.({
+              mapKey: "uk",
+              initialSensorId: stationId,
+            });
+            return;
+          }
           const button = event.target instanceof Element
             ? event.target.closest(".sensor-name-button[data-station-id]")
             : null;
-          if (!button || !detailsTableWrap.contains(button)) {
+          if (!button || !detailsTableWrap?.contains(button)) {
             return;
           }
           event.stopPropagation();
@@ -492,6 +508,25 @@ function initHexMapUkController(root) {
       let ukSearchPreloadPromise = null;
       let colorScale = null;
       let currentDomainMax = null;
+
+      function isMobileTooltipSuppressed() {
+        return Boolean(mobileTooltipQuery?.matches);
+      }
+
+      function suppressMobileTooltip() {
+        if (!isMobileTooltipSuppressed()) return;
+        pinnedTooltipCell = null;
+        tooltip?.classList.remove("visible");
+      }
+
+      if (mobileTooltipQuery) {
+        if (typeof mobileTooltipQuery.addEventListener === "function") {
+          mobileTooltipQuery.addEventListener("change", suppressMobileTooltip);
+        } else if (typeof mobileTooltipQuery.addListener === "function") {
+          mobileTooltipQuery.addListener(suppressMobileTooltip);
+        }
+      }
+
       function setStatus(value) {
         if (!statusEl) {
           return;
@@ -501,6 +536,9 @@ function initHexMapUkController(root) {
           const isLive = value === "Live";
           statusIndicator.dataset.state = isLive ? "live" : "idle";
         }
+        root.dispatchEvent(new CustomEvent("hexmapstatuschange", {
+          detail: { mapKey: "uk", status: String(value || "").toLowerCase() },
+        }));
       }
 
       if (endpointHint) {
@@ -1128,6 +1166,11 @@ function initHexMapUkController(root) {
         return pollutantDomain.get(key)?.label || "PM2.5";
       }
 
+      function getPollutantSortLabel(key) {
+        const definition = pollutantDomain.get(key);
+        return definition?.typographicLabel || definition?.label || "PM2.5";
+      }
+
       function getPollutantUnits(key) {
         return pollutantDomain.get(key)?.unit || "µg/m³";
       }
@@ -1160,6 +1203,7 @@ function initHexMapUkController(root) {
         if (mapSvg) {
           mapSvg.setAttribute("aria-label", `Hex cartogram of ${pollutantLabel} by constituency`);
         }
+        syncSortHeaders();
       }
 
       let ukInitialLoad = true;
@@ -2374,10 +2418,11 @@ function initHexMapUkController(root) {
       }
 
       function syncSortHeaders() {
+        const pollutantSortLabel = getPollutantSortLabel(activePollutant);
         const ACTIVE_ARIA = {
           sensor: { asc: "Sensor, sorted A to Z. Click to sort Z to A.", desc: "Sensor, sorted Z to A. Click to sort A to Z." },
           network: { asc: "Network, sorted A to Z. Click to sort Z to A.", desc: "Network, sorted Z to A. Click to sort A to Z." },
-          pm25: { asc: "PM2.5, sorted low to high. Click to sort high to low.", desc: "PM2.5, sorted high to low. Click to sort low to high." },
+          pm25: { asc: `${pollutantSortLabel}, sorted low to high. Click to sort high to low.`, desc: `${pollutantSortLabel}, sorted high to low. Click to sort low to high.` },
           updated: { asc: "Updated, sorted oldest first. Click to sort newest first.", desc: "Updated, sorted newest first. Click to sort oldest first." },
         };
         const sortingHidden = detailsTableWrap?.classList.contains("sensor-list-sort-hidden") === true;
@@ -2389,7 +2434,7 @@ function initHexMapUkController(root) {
           button.classList.toggle("is-active", isActive && !sortingHidden);
           button.disabled = sortingHidden;
           button.tabIndex = sortingHidden ? -1 : 0;
-          if (th) th.setAttribute("aria-sort", !sortingHidden && isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+          if (th?.dataset.sortKey === key) th.setAttribute("aria-sort", !sortingHidden && isActive ? (sortDir === "asc" ? "ascending" : "descending") : "none");
           const icon = button.querySelector(".sort-icon,.sort-arrow");
           if (icon) {
             icon.textContent = sortingHidden ? "" : renderSortIcon(key, sortKey, sortDir);
@@ -2405,23 +2450,111 @@ function initHexMapUkController(root) {
             button.title = getSortTooltip(key, sortKey, sortDir);
           }
         });
+        if (mobileSensorSortSelect) {
+          const highestOption = mobileSensorSortSelect.querySelector('option[value="pm25:desc"]');
+          const lowestOption = mobileSensorSortSelect.querySelector('option[value="pm25:asc"]');
+          if (highestOption) highestOption.textContent = `${pollutantSortLabel} highest`;
+          if (lowestOption) lowestOption.textContent = `${pollutantSortLabel} lowest`;
+          mobileSensorSortSelect.value = `${sortKey}:${sortDir}`;
+          mobileSensorSortSelect.disabled = sortingHidden;
+        }
+        if (mobileSensorSortControl) {
+          mobileSensorSortControl.hidden = sortingHidden;
+        }
       }
 
-      function updateInlinePanelHeight(sensorCount, extraRowCount = 0) {
+      function measureVisibleSensorRows(targetSensorRows) {
+        let visibleSensorRows = 0;
+        let visibleRowsHeight = 0;
+        for (const row of Array.from(detailsTableBody?.children || [])) {
+          visibleRowsHeight += row.getBoundingClientRect().height;
+          if (!row.classList.contains("sensor-row-divider")) {
+            visibleSensorRows += 1;
+            if (visibleSensorRows >= targetSensorRows) break;
+          }
+        }
+        return { visibleSensorRows, visibleRowsHeight };
+      }
+
+      function updateInlinePanelHeight(sensorCount) {
         if (!mapCanvasWrap) {
           return;
         }
         const count = Math.max(0, Number(sensorCount) || 0);
-        const totalRows = count + Math.max(0, Number(extraRowCount) || 0);
-        const hasOverflowByCount = totalRows > SENSOR_PANEL_MAX_VISIBLE_ROWS;
-        const visibleRows = Math.min(totalRows, SENSOR_PANEL_MAX_VISIBLE_ROWS);
-        const effectiveRowHeight = SENSOR_PANEL_ROW_HEIGHT;
-        const tableWrapMaxHeight = SENSOR_TABLE_HEADER_HEIGHT + (visibleRows * effectiveRowHeight);
+        const panelBorderHeight = inlinePanel
+          ? Math.max(0, inlinePanel.offsetHeight - inlinePanel.clientHeight)
+          : 0;
+        const measuredHeaderHeight = inlinePanelHeader?.getBoundingClientRect().height || 0;
+        const emptyHeight = detailsEmpty && !detailsEmpty.hidden
+          ? detailsEmpty.getBoundingClientRect().height
+          : 0;
+
+        if (mobileTooltipQuery?.matches) {
+          detailsTableWrap?.style.removeProperty("max-height");
+          detailsTableWrap?.style.removeProperty("overflow-y");
+
+          const headerHeight = measuredHeaderHeight;
+          const tableHeaderHeight = detailsTableHead?.getBoundingClientRect().height || 0;
+          const mobileToolbarHeight = mobileSensorListToolbar && !mobileSensorListToolbar.hidden
+            ? mobileSensorListToolbar.getBoundingClientRect().height
+            : 0;
+          const targetSensorRows = Math.min(NARROW_SENSOR_ROWS, count);
+          const { visibleRowsHeight } = measureVisibleSensorRows(targetSensorRows);
+          const usefulContentHeight = Math.ceil(
+            panelBorderHeight
+            + headerHeight
+            + (count ? tableHeaderHeight + mobileToolbarHeight + visibleRowsHeight : emptyHeight)
+          );
+          const hasMeasurableLayout = Boolean(
+            headerHeight
+            && (!count || visibleRowsHeight)
+            && (count || detailsEmpty?.hidden || emptyHeight)
+          );
+          if (!hasMeasurableLayout) {
+            detailScrollAffordances?.update?.();
+            return;
+          }
+          const panelHeight = count
+            ? usefulContentHeight
+            : Math.max(SENSOR_PANEL_EMPTY_HEIGHT, usefulContentHeight);
+          mapCanvasWrap.style.setProperty("--sensor-panel-height", `${panelHeight}px`);
+
+          const hasOverflow = Boolean(
+            count
+            && detailsTableWrap
+            && !detailsTableWrap.hidden
+            && (
+              count > NARROW_SENSOR_ROWS
+              || detailsTableWrap.scrollHeight > detailsTableWrap.clientHeight + 1
+            )
+          );
+          detailsTableWrap?.classList.toggle("is-scroll-forced", hasOverflow);
+          inlinePanelBody?.classList.toggle("is-scroll-forced", hasOverflow);
+          detailScrollAffordances?.update?.();
+          return;
+        }
+
+        const targetSensorRows = Math.min(DESKTOP_SENSOR_ROWS, count);
+        const { visibleRowsHeight } = measureVisibleSensorRows(targetSensorRows);
+        const hasOverflowByCount = count > DESKTOP_SENSOR_ROWS;
+        const tableHeaderHeight = detailsTableHead?.getBoundingClientRect().height || 0;
+        const sensorListToolbarHeight = mobileSensorListToolbar && !mobileSensorListToolbar.hidden
+          ? mobileSensorListToolbar.getBoundingClientRect().height
+          : 0;
+        const tableWrapMaxHeight = tableHeaderHeight + visibleRowsHeight;
+        const headerHeight = Math.max(
+          SENSOR_PANEL_HEADER_HEIGHT,
+          Math.ceil(measuredHeaderHeight)
+        );
         const panelHeight = count
-          ? SENSOR_PANEL_HEADER_HEIGHT
-            + SENSOR_TABLE_HEADER_HEIGHT
-            + (visibleRows * effectiveRowHeight)
-          : SENSOR_PANEL_EMPTY_HEIGHT;
+          ? headerHeight
+            + sensorListToolbarHeight
+            + tableHeaderHeight
+            + visibleRowsHeight
+          : Math.max(
+              SENSOR_PANEL_EMPTY_HEIGHT,
+              Math.ceil(panelBorderHeight + headerHeight + emptyHeight)
+            );
         mapCanvasWrap.style.setProperty("--sensor-panel-height", `${panelHeight}px`);
         if (inlinePanelBody) {
           inlinePanelBody.classList.toggle("is-scroll-forced", hasOverflowByCount);
@@ -2435,6 +2568,20 @@ function initHexMapUkController(root) {
           inlinePanelBody?.classList.toggle("is-scroll-forced", hasOverflow);
         }
         detailScrollAffordances?.update?.();
+      }
+
+      function refreshInlinePanelGeometry() {
+        updateInlinePanelHeight(detailsTableBody?.querySelectorAll("tr:not(.sensor-row-divider)").length || 0);
+        updateSelectedHexViewportShift();
+      }
+
+      if (inlinePanelHeader && typeof ResizeObserver !== "undefined") {
+        const inlinePanelHeaderObserver = new ResizeObserver(() => {
+          if (detailsEmpty && !detailsEmpty.hidden) {
+            refreshInlinePanelGeometry();
+          }
+        });
+        inlinePanelHeaderObserver.observe(inlinePanelHeader);
       }
 
       function updateDetailsPanel() {
@@ -2490,6 +2637,7 @@ function initHexMapUkController(root) {
         const stationEntries = collectStationEntries(scopedRows, selectedPconCode);
         chartLaunchAvailable = stationEntries.length > 0;
         syncInlinePanelTitleInteractivity();
+        truncation.refresh(inlinePanel);
         if (!stationEntries.length) {
           const zeroCount = formatSelectedAreaSensorCount(0, 0);
           detailsMeta.textContent = zeroCount;
@@ -2565,14 +2713,12 @@ function initHexMapUkController(root) {
               <td class="sensor-chart-symbol-col">${
                 chartModeActive
                   ? symbolMarkup
-                  : `<button type="button" class="sensor-chart-launch" data-station-id="${escapeHtmlLocal(stationId)}" aria-label="Open chart for ${escapeHtmlLocal(stationName)}" title="Open chart">
-                      <img src="/images/UK-AQ-Sensor-Buttons-chart.svg" alt="" aria-hidden="true" />
-                    </button>`
+                  : `<button type="button" class="sensor-chart-launch" data-station-id="${escapeHtmlLocal(stationId)}" aria-label="Open chart for ${escapeHtmlLocal(stationName)}" title="Open chart"><img src="/images/UK-AQ-Sensor-Buttons-chart.svg" alt="" aria-hidden="true"></button>`
               }</td>
-              <td class="sensor-col-sensor"><button type="button" class="sensor-name-button" data-station-id="${escapeHtmlLocal(stationId)}">${escapeHtmlLocal(stationName)}</button></td>
-              <td class="sensor-col-network">${escapeHtmlLocal(networkLabel)}</td>
-              <td class="sensor-col-value"><span class="sensor-reading-cell"><span class="sensor-reading-dot" style="--sensor-reading-color:${readingColor}"></span><span class="sensor-reading-text">${Number.isFinite(entry.value) ? `${formatValue(entry.value)} ${pollutantUnits}` : "-"}</span></span></td>
-              <td class="sensor-col-updated">${updatedText}</td>
+              <td class="sensor-col-sensor"><div class="sensor-identity-cell"><button type="button" class="sensor-name-button" data-station-id="${escapeHtmlLocal(stationId)}" data-hex-truncation data-hex-truncation-tooltip="${escapeHtmlLocal(stationName)}"><span class="sensor-name-text">${escapeHtmlLocal(stationName)}</span><span class="sensor-network-text sensor-network-text--compact" data-hex-truncation>${escapeHtmlLocal(networkLabel)}</span></button></div></td>
+              <td class="sensor-col-network"><span class="sensor-network-text sensor-network-text--wide" data-hex-truncation data-hex-truncation-focusable="true">${escapeHtmlLocal(networkLabel)}</span></td>
+              <td class="sensor-col-value"><span class="sensor-reading-cell"><span class="sensor-reading-dot" style="--sensor-reading-color:${readingColor}"></span><span class="sensor-reading-text" data-hex-truncation data-hex-truncation-focusable="true">${Number.isFinite(entry.value) ? `${formatValue(entry.value)} ${pollutantUnits}` : "-"}</span></span></td>
+              <td class="sensor-col-updated"><span class="sensor-observed-text" data-hex-truncation data-hex-truncation-focusable="true">${updatedText}</span></td>
             </tr>
           `;
         };
@@ -2586,7 +2732,8 @@ function initHexMapUkController(root) {
           dividerRow,
           outsideWindowEntries.map(renderSensorRow).join(""),
         ].join("");
-        updateInlinePanelHeight(entries.length, dividerRow ? 1 : 0);
+        truncation.refresh(inlinePanel);
+        updateInlinePanelHeight(entries.length);
         updateSelectedHexViewportShift();
       }
 
@@ -3006,7 +3153,7 @@ function initHexMapUkController(root) {
       }
 
       function getCheckedNetworkEntries() {
-        return networkController.getSelectedEntries();
+        return networkController.getEffectiveSelectedEntries();
       }
 
       function selectionIncludesMatcher(entries, matchers) {
@@ -3206,7 +3353,8 @@ function initHexMapUkController(root) {
       }
 
       function showTooltipForCell(cell, event) {
-        if (!tooltip || !cell) {
+        if (!tooltip || !cell || isMobileTooltipSuppressed()) {
+          suppressMobileTooltip();
           return;
         }
         tooltip.innerHTML = buildTooltipHtml(cell);
@@ -3217,6 +3365,10 @@ function initHexMapUkController(root) {
       }
 
       function setPinnedTooltip(cell, event) {
+        if (isMobileTooltipSuppressed()) {
+          suppressMobileTooltip();
+          return;
+        }
         pinnedTooltipCell = cell || null;
         if (pinnedTooltipCell) {
           showTooltipForCell(pinnedTooltipCell, event);
@@ -3224,13 +3376,18 @@ function initHexMapUkController(root) {
       }
 
       function refreshPinnedTooltip() {
-        if (!pinnedTooltipCell) {
+        if (!pinnedTooltipCell || isMobileTooltipSuppressed()) {
+          suppressMobileTooltip();
           return;
         }
         showTooltipForCell(pinnedTooltipCell);
       }
 
       function positionTooltip(event) {
+        if (!tooltip || isMobileTooltipSuppressed()) {
+          suppressMobileTooltip();
+          return;
+        }
         const left = event.clientX + window.scrollX + 12;
         const pointerY = event.clientY + window.scrollY;
         const viewportTop = window.scrollY;
@@ -3607,6 +3764,9 @@ function initHexMapUkController(root) {
             if (!isStale()) {
               baseLatestRows = mergedLatest;
               latestPollutant = responsePollutant;
+              if (requestWindow === "all") {
+                networkController.updatePollutantCapability(requestPollutant, cleanedLatest);
+              }
               pollutantCache.set(latestCacheKey, {
                 timestamp: Date.now(),
                 latestRows: mergedLatest,
@@ -3637,6 +3797,7 @@ function initHexMapUkController(root) {
             const latestAllPayload = await latestAllResponse.json();
             const latestAllRaw = latestAllPayload?.data || [];
             const cleanedLatestAll = latestAllRaw.filter((row) => Number.isFinite(resolveLatestValue(row)));
+            networkController.updatePollutantCapability(requestPollutant, cleanedLatestAll);
             baseLatestRowsAllWindow = cleanedLatestAll;
             pollutantCache.set(latestAllCacheKey, {
               timestamp: Date.now(),
@@ -3837,6 +3998,7 @@ function initHexMapUkController(root) {
           return;
         }
         syncInlinePanelTitleInteractivity();
+        truncation.refresh(inlinePanel);
         if (detail.isChartMode) {
           return;
         }
@@ -3855,7 +4017,7 @@ function initHexMapUkController(root) {
         if (targetElement && typeof targetElement.closest === "function" && targetElement.closest("polygon.hex")) {
           return;
         }
-        if (targetElement && typeof targetElement.closest === "function" && targetElement.closest(".map-inline-sensor-panel, .map-settings-panel, .map-settings, .map-zoom-controls, .map-topbar, .networks-pill-anchor, .networks-pill, .hex-chart-mode-panel")) {
+        if (targetElement && typeof targetElement.closest === "function" && targetElement.closest(".map-inline-sensor-panel, .map-settings-panel, .map-settings, .map-zoom-controls, .map-topbar, .mobile-map-controls, .networks-pill-anchor, .networks-pill, .hex-chart-mode-panel")) {
           return;
         }
         setSelectedCell(null);
@@ -3886,6 +4048,17 @@ function initHexMapUkController(root) {
           syncSortHeaders();
           updateDetailsPanel();
         });
+      });
+      mobileSensorSortSelect?.addEventListener("change", () => {
+        const [nextKey, nextDir] = String(mobileSensorSortSelect.value || "").split(":");
+        if (!(nextKey in SORT_DEFAULTS) || (nextDir !== "asc" && nextDir !== "desc")) {
+          syncSortHeaders();
+          return;
+        }
+        sortKey = nextKey;
+        sortDir = nextDir;
+        syncSortHeaders();
+        updateDetailsPanel();
       });
       syncSortHeaders();
 
@@ -3920,11 +4093,13 @@ function initHexMapUkController(root) {
         if (statusEl.textContent === "Live") {
           renderMap();
         }
+        refreshInlinePanelGeometry();
         syncSettingsPanelWidth();
         if (mapSettingsPanel?.classList.contains("open")) {
           positionSettingsPanel();
         }
       });
+      window.addEventListener("hexsensorlistpresentationchange", refreshInlinePanelGeometry);
       applyMetricState();
       syncPollutantButtons();
       updatePollutantLabels();
@@ -4079,15 +4254,22 @@ function initHexMapUkController(root) {
           if (statusEl.textContent === "Live") {
             requestAnimationFrame(() => {
               renderMap();
+              refreshInlinePanelGeometry();
             });
+          } else {
+            requestAnimationFrame(refreshInlinePanelGeometry);
           }
           syncSettingsPanelWidth();
         },
         renderLayout: () => {
           requestAnimationFrame(() => {
             renderMap();
+            refreshInlinePanelGeometry();
           });
           syncSettingsPanelWidth();
+        },
+        refreshSensorPanelGeometry: () => {
+          refreshInlinePanelGeometry();
         },
         restoreNetworks: () => {
           applyNetworkFilters();

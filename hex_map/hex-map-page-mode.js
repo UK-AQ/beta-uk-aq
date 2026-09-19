@@ -28,7 +28,9 @@ function initHexMapPageMode(root) {
     root.document.body.classList.toggle("hex-chart-mode", chartMode);
     const backButton = root.document.getElementById("chart-back-to-map");
     if (backButton) backButton.hidden = !chartMode;
-    return snapshot();
+    const nextState = snapshot();
+    root.dispatchEvent(new CustomEvent("hexpagemodechange", { detail: nextState }));
+    return nextState;
   }
 
   function enterChart(mapKey) {

@@ -38,11 +38,14 @@
     <link rel="stylesheet" href="/mobile.css" media="(max-width: 767px)">
 </head>
   <body class="hex-map-page">
-    <div id="cic-sidebar-mount"></div>
+    <div id="uk-aq-sidebar-mount"></div>
     <script src="/sidebar.js"></script>
     <main>
       <header>
-        <img src="/images/UK-AQ-hex-map.svg" alt="Hex Map" class="page-title" />
+        <h1 class="page-title-heading">
+          <span class="page-title-text">Hex Map</span>
+          <img src="/images/UK-AQ-hex-map.svg" alt="" aria-hidden="true" class="page-title" />
+        </h1>
       </header>
 
       <div class="ukaq-beta-notice-mount" data-ukaq-beta-notice-mount></div>
@@ -75,85 +78,94 @@
                 <div id="uk-toolbar-slot" class="map-controls-row">
                   <!-- ── Toolbar: scope switcher + region popover + pollutant pills ── -->
                   <div class="toolbar" id="main-toolbar">
-                    <button type="button" class="chart-back-pill" id="chart-back-to-map" aria-label="Back to Hex Map" title="Back to Hex Map" hidden>
-                      <img src="/images/UK-AQ-back-arrow.svg" alt="" aria-hidden="true" />
-                      <span>Back to Hex Map</span>
-                    </button>
-                    <span class="field-label chart-mode-view-control">View</span>
-                    <div class="segmented segmented--view chart-mode-view-control">
-                      <button type="button" id="toolbar-tab-uk" class="active">
-                        <span class="view-button-main">United Kingdom</span>
-                        <span class="view-button-sub">Constituencies</span>
-                      </button>
-                      <button type="button" id="toolbar-tab-cr">
-                        <span class="view-button-main">Countries &amp; Regions</span>
-                        <span class="view-button-sub">Local Authorities</span>
-                      </button>
-                    </div>
+                    <div class="toolbar-control-row toolbar-control-row--one" data-toolbar-control-row="one">
+                      <div class="toolbar-control-group toolbar-control-group--view">
+                        <span class="field-label chart-mode-view-control">View</span>
+                        <div class="segmented segmented--view chart-mode-view-control">
+                          <button type="button" id="toolbar-tab-uk" class="active">
+                            <span class="view-button-main">United Kingdom</span>
+                            <span class="view-button-sub">Constituencies</span>
+                          </button>
+                          <button type="button" id="toolbar-tab-cr">
+                            <span class="view-button-main">Countries &amp; Regions</span>
+                            <span class="view-button-sub">Local Authorities</span>
+                          </button>
+                        </div>
 
-                    <div class="toolbar-region-section chart-mode-view-control" id="toolbar-region-section">
-                      <div class="toolbar-divider"></div>
-                      <div class="popover-wrap" id="toolbar-popover-wrap">
-                        <button type="button" class="popover-trigger" id="toolbar-region-trigger" aria-haspopup="true" aria-expanded="false">
-                          <span id="toolbar-region-label">London</span>
-                          <svg class="chevron" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
-                            <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                          </svg>
-                        </button>
-                        <div class="popover-menu" id="toolbar-region-menu" hidden>
-                          <div class="popover-group-head">Countries</div>
-                          <div class="popover-item" data-region="Northern Ireland">Northern Ireland</div>
-                          <div class="popover-item" data-region="Scotland">Scotland</div>
-                          <div class="popover-item" data-region="Wales">Wales</div>
-                          <div class="popover-divider"></div>
-                          <div class="popover-group-head">English Regions</div>
-                          <div class="popover-item" data-region="East Midlands">East Midlands</div>
-                          <div class="popover-item" data-region="East of England">East of England</div>
-                          <div class="popover-item" data-region="London">London</div>
-                          <div class="popover-item" data-region="North East">North East</div>
-                          <div class="popover-item" data-region="North West">North West</div>
-                          <div class="popover-item" data-region="South East">South East</div>
-                          <div class="popover-item" data-region="South West">South West</div>
-                          <div class="popover-item" data-region="West Midlands">West Midlands</div>
-                          <div class="popover-item" data-region="Yorkshire and The Humber">Yorkshire and The Humber</div>
+                        <div class="toolbar-region-section chart-mode-view-control" id="toolbar-region-section">
+                          <div class="toolbar-divider"></div>
+                          <div class="popover-wrap" id="toolbar-popover-wrap">
+                            <button type="button" class="popover-trigger" id="toolbar-region-trigger" aria-haspopup="true" aria-expanded="false">
+                              <span id="toolbar-region-label">London</span>
+                              <svg class="chevron" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                                <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                              </svg>
+                            </button>
+                            <div class="popover-menu" id="toolbar-region-menu" hidden>
+                              <div class="popover-group-head">Countries</div>
+                              <div class="popover-item" data-region="Northern Ireland">Northern Ireland</div>
+                              <div class="popover-item" data-region="Scotland">Scotland</div>
+                              <div class="popover-item" data-region="Wales">Wales</div>
+                              <div class="popover-divider"></div>
+                              <div class="popover-group-head">English Regions</div>
+                              <div class="popover-item" data-region="East Midlands">East Midlands</div>
+                              <div class="popover-item" data-region="East of England">East of England</div>
+                              <div class="popover-item" data-region="London">London</div>
+                              <div class="popover-item" data-region="North East">North East</div>
+                              <div class="popover-item" data-region="North West">North West</div>
+                              <div class="popover-item" data-region="South East">South East</div>
+                              <div class="popover-item" data-region="South West">South West</div>
+                              <div class="popover-item" data-region="West Midlands">West Midlands</div>
+                              <div class="popover-item" data-region="Yorkshire and The Humber">Yorkshire &amp; Humber</div>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div class="toolbar-divider chart-mode-view-divider"></div>
-                    <span class="field-label">Pollutant</span>
-                    <div class="pill-group">
-                      <div class="pollutant-selector" id="pollutant-selector" role="radiogroup" aria-label="Pollutant">
-                        <button type="button" class="pill" data-pollutant="pm25" role="radio" aria-checked="true" tabindex="0">PM2.5</button>
-                        <button type="button" class="pill" data-pollutant="pm10" role="radio" aria-checked="false" tabindex="-1">PM10</button>
-                        <button type="button" class="pill" data-pollutant="no2" role="radio" aria-checked="false" tabindex="-1">NO₂</button>
-                      </div>
-                    </div>
-                    <div class="toolbar-divider" aria-hidden="true"></div>
-                    <div class="window-stepper" id="window-stepper" data-window-stepper>
-                      <span class="field-label window-stepper-label">Window</span>
-                      <div class="window-stepper-control" role="group" aria-label="Averaging window">
-                        <button type="button" class="window-stepper-arrow window-stepper-arrow--left" data-window-step="prev" aria-label="Use shorter window">‹</button>
-                        <div class="window-stepper-value-box" aria-live="polite" aria-atomic="true">
-                          <span class="window-stepper-value" data-window-value>6 Hours</span>
+                      <div class="toolbar-divider chart-mode-view-divider"></div>
+                      <div class="toolbar-control-group pollutant-control-group">
+                        <span class="field-label">Pollutant</span>
+                        <div class="pill-group">
+                          <div class="pollutant-selector" id="pollutant-selector" role="radiogroup" aria-label="Pollutant">
+                            <button type="button" class="pill" data-pollutant="pm25" role="radio" aria-checked="true" tabindex="0">PM2.5</button>
+                            <button type="button" class="pill" data-pollutant="pm10" role="radio" aria-checked="false" tabindex="-1">PM10</button>
+                            <button type="button" class="pill" data-pollutant="no2" role="radio" aria-checked="false" tabindex="-1">NO₂</button>
+                          </div>
                         </div>
-                        <button type="button" class="window-stepper-arrow window-stepper-arrow--right" data-window-step="next" aria-label="Use longer window">›</button>
                       </div>
+
+                      <div class="toolbar-divider" aria-hidden="true"></div>
+                      <div class="toolbar-control-group window-stepper" id="window-stepper" data-window-stepper>
+                        <span class="field-label window-stepper-label">Window</span>
+                        <div class="window-stepper-control" role="group" aria-label="Averaging window">
+                          <button type="button" class="window-stepper-arrow window-stepper-arrow--left" data-window-step="prev" aria-label="Use shorter window">‹</button>
+                          <div class="window-stepper-value-box" aria-live="polite" aria-atomic="true">
+                            <span class="window-stepper-value" data-window-value>6 Hours</span>
+                          </div>
+                          <button type="button" class="window-stepper-arrow window-stepper-arrow--right" data-window-step="next" aria-label="Use longer window">›</button>
+                        </div>
+                      </div>
+                      <div class="toolbar-divider chart-range-toolbar" aria-hidden="true"></div>
+                      <label class="toolbar-control-group chart-range-toolbar" for="hex-chart-window-toolbar">
+                        <span class="field-label">Chart range</span>
+                        <select id="hex-chart-window-toolbar" aria-label="Chart range">
+                          <option value="12h">Last 12 hours</option>
+                          <option value="24h" selected>Last 24 hours</option>
+                          <option value="7d">Last 7 days</option>
+                          <option value="31d">Last 31 days</option>
+                          <option value="90d">Last 90 days</option>
+                        </select>
+                      </label>
                     </div>
-                    <div class="toolbar-divider chart-range-toolbar" aria-hidden="true"></div>
-                    <label class="chart-range-toolbar" for="hex-chart-window-toolbar">
-                      <span class="field-label">Chart range</span>
-                      <select id="hex-chart-window-toolbar" aria-label="Chart range">
-                        <option value="12h">Last 12 hours</option>
-                        <option value="24h" selected>Last 24 hours</option>
-                        <option value="7d">Last 7 days</option>
-                        <option value="31d">Last 31 days</option>
-                        <option value="90d">Last 90 days</option>
-                      </select>
-                    </label>
+                    <div class="toolbar-control-row toolbar-control-row--two" data-toolbar-control-row="two"></div>
+                    <div class="toolbar-control-row toolbar-control-row--three" data-toolbar-control-row="three"></div>
+                    <div class="toolbar-search-row" data-toolbar-search-row></div>
                     <div class="toolbar-right">
-                      <div class="toolbar-status-slot" id="toolbar-status-slot" aria-live="polite"></div>
-                      <div class="toolbar-refresh-slot" id="toolbar-refresh-slot"></div>
+                      <div class="toolbar-status-actions">
+                        <div class="toolbar-status-slot" id="toolbar-status-slot" aria-live="polite"></div>
+                        <div class="toolbar-refresh-slot" id="toolbar-refresh-slot"></div>
+                      </div>
+                      <div class="toolbar-networks-slot" data-toolbar-networks-slot></div>
                     </div>
                   </div>
                 </div>
@@ -211,7 +223,6 @@
                       class="map-search-input"
                       type="search"
                       autocomplete="off"
-                      autocapitalize="characters"
                       spellcheck="false"
                       role="combobox"
                       aria-autocomplete="list"
@@ -254,16 +265,41 @@
 <!--
 				  -->
                   <section class="hex-chart-mode-panel" id="uk-hex-chart-mode" aria-label="Selected constituency sensors chart" hidden>
-                  <div class="hex-chart-selected-sensors" id="uk-hex-chart-reading" aria-label="Selected chart sensors"></div>
-                  <div class="hex-chart-message" id="uk-hex-chart-message" aria-live="polite"></div>
-                  <div class="hex-chart-wrap" id="uk-hex-chart-wrap">
-                    <svg class="hex-chart-svg" id="uk-hex-chart-svg" role="img" aria-label="Selected sensor chart"></svg>
-                    <div class="hex-chart-loading" id="uk-hex-chart-loading">Loading chart data…</div>
-                    <div class="chart-tooltip" id="uk-hex-chart-tooltip"></div>
-                  </div>
-                </section>
+                    <div class="mobile-chart-controls" data-mobile-chart-controls data-map-kind="uk" aria-label="Chart controls">
+                      <div class="mobile-chart-controls-row mobile-chart-controls-row--primary">
+                        <div class="mobile-chart-control-mount mobile-chart-control-mount--network" data-mobile-chart-network></div>
+                      </div>
+                      <div class="mobile-chart-networks-panel-mount" data-mobile-chart-networks-panel></div>
+                      <div class="mobile-chart-controls-row mobile-chart-controls-row--secondary">
+                        <div class="mobile-chart-control-mount mobile-chart-control-mount--pollutant" data-mobile-chart-pollutant></div>
+                        <div class="mobile-chart-control-mount mobile-chart-control-mount--range" data-mobile-chart-range></div>
+                      </div>
+                    </div>
+                    <div class="hex-chart-selected-sensors" id="uk-hex-chart-reading" aria-label="Selected chart sensors"></div>
+                    <div class="hex-chart-wrap" id="uk-hex-chart-wrap">
+                      <div class="hex-chart-message" id="uk-hex-chart-message" aria-live="polite"></div>
+                      <svg class="hex-chart-svg" id="uk-hex-chart-svg" role="img" aria-label="Selected sensor chart"></svg>
+                      <div class="hex-chart-loading" id="uk-hex-chart-loading">Loading chart data…</div>
+                      <div class="chart-tooltip" id="uk-hex-chart-tooltip"></div>
+                    </div>
+                  </section>
                 <div class="map-svg-viewport">
                   <svg id="hex-map" role="img" aria-label="Hex cartogram of PM2.5 by constituency"></svg>
+                </div>
+                <div
+                  class="map-pollutant-unavailable"
+                  data-pollutant-unavailable-overlay
+                  data-map-kind="uk"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                  hidden
+                >
+                  <p class="map-pollutant-unavailable-message">
+                    <span data-pollutant-unavailable-lead></span>
+                    <span data-pollutant-unavailable-names hidden></span>
+                    <span data-pollutant-unavailable-action></span>
+                  </p>
                 </div>
                 <div class="map-settings-panel" id="map-settings-panel" role="dialog" aria-label="Sensor data settings">
                   <div class="map-settings-header">
@@ -323,8 +359,12 @@
                   </button>
                 </div>
                 <!-- ── Floating legend pill (layout test) ── -->
-                <div class="legend map-legend legend-pill">
-                  <span id="legend-pollutant">PM2.5 (µg/m³)</span>
+                <div class="map-legend-region">
+                  <div class="legend map-legend legend-pill">
+                    <div class="legend-title-line">
+                      <span id="legend-pollutant">PM2.5 (µg/m³)</span>
+                      <span id="legend-label"></span>
+                    </div>
                   <div
                     id="legend-scale"
                     class="legend-scale"
@@ -345,7 +385,7 @@
                     </div>
                     <span class="legend-value" id="legend-max">-</span>
                   </div>
-                  <span id="legend-label"></span>
+                  </div>
                 </div>
           <!-- inline sensor panel -->
           <div class="map-inline-sensor-panel" id="map-inline-sensor-panel" aria-live="polite">
@@ -357,7 +397,7 @@
                     <button type="button" class="sensor-title-icon-button" aria-label="Open sensor chart" title="Open sensor chart" disabled>
                       <img src="/images/UK-AQ-Sensor-Buttons-chart.svg" alt="" aria-hidden="true" />
                     </button>
-                    <div class="sensor-panel-title" id="sensor-panel-title"></div>
+                    <div class="sensor-panel-title" id="sensor-panel-title" data-hex-truncation data-hex-truncation-focusable="true"></div>
                   </span>
                   <svg id="sensor-panel-hex-icon" viewBox="0 0 52 60" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M26 0L52 15V45L26 60L0 45V15L26 0Z" fill="currentColor"/>
@@ -367,12 +407,35 @@
                 <div class="sensor-network-label" id="sensor-panel-network-label"></div>
               </div>
               <div class="sensor-panel-count" id="sensor-panel-count"></div>
-              <button type="button" class="sensor-panel-close" id="sensor-panel-close" aria-label="Close sensor panel">
-                <img src="/images/Red-Square-Button-White-Cross-200x200.svg" alt="" aria-hidden="true" />
-              </button>
+              <div class="mobile-sensor-sort" hidden>
+                <label for="sensor-mobile-sort">Sort</label>
+                <select id="sensor-mobile-sort" aria-label="Sort sensors">
+                  <option value="pm25:desc">PM2.5 highest</option>
+                  <option value="pm25:asc">PM2.5 lowest</option>
+                  <option value="updated:desc">Newest observed</option>
+                  <option value="updated:asc">Oldest observed</option>
+                  <option value="sensor:asc">Sensor A–Z</option>
+                  <option value="sensor:desc">Sensor Z–A</option>
+                  <option value="network:asc">Network A–Z</option>
+                  <option value="network:desc">Network Z–A</option>
+                </select>
+              </div>
+              <div class="sensor-panel-header-actions">
+                <button type="button" class="sensor-panel-back" id="sensor-panel-back-to-map" data-chart-back-to-map aria-label="Back to Hex Map, keep area selected" title="Back to Hex Map, keep area selected">
+                  <img class="sensor-panel-back-map-icon" src="/sidebar-images/uk-aq-hex-map-sidebar.svg" alt="" aria-hidden="true" />
+                  <img class="sensor-panel-back-arrow" src="/images/UK-AQ-back-arrow.svg" alt="" aria-hidden="true" />
+                </button>
+                <button type="button" class="sensor-panel-close" id="sensor-panel-close" aria-label="Close sensor panel">
+                  <img src="/images/Red-Square-Button-White-Cross-200x200.svg" alt="" aria-hidden="true" />
+                </button>
+              </div>
             </div>
             <div class="map-inline-sensor-panel-body" id="sensor-panel-body">
               <div class="details-empty" id="details-empty">Select a constituency to see sensors.</div>
+              <div class="mobile-sensor-list-toolbar" data-mobile-sensor-list-toolbar hidden>
+                <div class="mobile-sensor-list-toolbar-select" data-mobile-sensor-select-mount></div>
+                <div class="mobile-sensor-list-toolbar-sort" data-mobile-sensor-sort-mount></div>
+              </div>
               <div class="sensor-table-wrap" id="sensor-table-wrap" hidden>
                 <table class="sensor-table">
                   <thead>
@@ -386,13 +449,19 @@
                       </th>
                       <th scope="col" class="sensor-chart-symbol-col" aria-label="Symbol"></th>
                       <th scope="col" class="sensor-col-sensor" data-sort-key="sensor" aria-sort="none">
-                        <button type="button" class="sort-header" data-sort-key="sensor" data-sort-type="alpha" title="Sort A→Z">
-                          <span class="sort-label">Sensor</span>
-                          <span class="sort-icon" aria-hidden="true"></span>
-                        </button>
+                        <div class="sensor-sort-header-stack">
+                          <button type="button" class="sort-header" data-sort-key="sensor" data-sort-type="alpha" title="Sort A→Z">
+                            <span class="sort-label">Sensor</span>
+                            <span class="sort-icon" aria-hidden="true"></span>
+                          </button>
+                          <button type="button" class="sort-header sort-header--network sort-header--narrow" data-sort-key="network" data-sort-type="alpha" title="Sort A→Z">
+                            <span class="sort-label">Network</span>
+                            <span class="sort-icon" aria-hidden="true"></span>
+                          </button>
+                        </div>
                       </th>
                       <th scope="col" class="sensor-col-network" data-sort-key="network" aria-sort="none">
-                        <button type="button" class="sort-header" data-sort-key="network" data-sort-type="alpha" title="Sort A→Z">
+                        <button type="button" class="sort-header sort-header--wide" data-sort-key="network" data-sort-type="alpha" title="Sort A→Z">
                           <span class="sort-label">Network</span>
                           <span class="sort-icon" aria-hidden="true"></span>
                         </button>
@@ -416,6 +485,24 @@
               </div>
             </div>
           </div>
+              </div>
+              <div class="mobile-map-controls-row" data-mobile-map-controls-row data-map-kind="uk">
+                <div class="mobile-map-controls-row--primary">
+                  <div class="mobile-map-controls mobile-map-controls--left" data-mobile-map-controls-left></div>
+                  <div class="mobile-map-controls mobile-map-controls--right" data-mobile-map-controls-right></div>
+                </div>
+                <div class="mobile-map-networks-panel-mount" data-mobile-map-networks-panel></div>
+                <div class="mobile-map-controls-row--secondary">
+                  <div class="mobile-map-controls mobile-map-controls--pollutant" data-mobile-map-controls-pollutant></div>
+                </div>
+                <div class="mobile-map-controls-row--tertiary">
+                  <div class="mobile-map-controls mobile-map-controls--region" data-mobile-map-controls-region></div>
+                </div>
+                <div class="mobile-map-search-mount" data-mobile-map-search></div>
+                <div class="mobile-map-controls-row--utility">
+                  <div class="mobile-map-controls mobile-map-controls--centre" data-mobile-map-controls-centre></div>
+                  <div class="mobile-map-status-row" data-mobile-map-status-row aria-live="polite"></div>
+                </div>
               </div>
           <aside class="map-networks-dock" data-networks-dock hidden aria-hidden="true"></aside>
             </div>
@@ -807,7 +894,6 @@
                       class="map-search-input"
                       type="search"
                       autocomplete="off"
-                      autocapitalize="characters"
                       spellcheck="false"
                       role="combobox"
                       aria-autocomplete="list"
@@ -851,9 +937,19 @@
 				  <!--
 					  -->
                   <section class="hex-chart-mode-panel" id="cr-hex-chart-mode" aria-label="Selected local authority sensors chart" hidden>
+                    <div class="mobile-chart-controls" data-mobile-chart-controls data-map-kind="cr" aria-label="Chart controls">
+                      <div class="mobile-chart-controls-row mobile-chart-controls-row--primary">
+                        <div class="mobile-chart-control-mount mobile-chart-control-mount--network" data-mobile-chart-network></div>
+                      </div>
+                      <div class="mobile-chart-networks-panel-mount" data-mobile-chart-networks-panel></div>
+                      <div class="mobile-chart-controls-row mobile-chart-controls-row--secondary">
+                        <div class="mobile-chart-control-mount mobile-chart-control-mount--pollutant" data-mobile-chart-pollutant></div>
+                        <div class="mobile-chart-control-mount mobile-chart-control-mount--range" data-mobile-chart-range></div>
+                      </div>
+                    </div>
                     <div class="hex-chart-selected-sensors" id="cr-hex-chart-reading" aria-label="Selected chart sensors"></div>
-                    <div class="hex-chart-message" id="cr-hex-chart-message" aria-live="polite"></div>
                     <div class="hex-chart-wrap" id="cr-hex-chart-wrap">
+                      <div class="hex-chart-message" id="cr-hex-chart-message" aria-live="polite"></div>
                       <svg class="hex-chart-svg" id="cr-hex-chart-svg" role="img" aria-label="Selected sensor chart"></svg>
                       <div class="hex-chart-loading" id="cr-hex-chart-loading">Loading chart data…</div>
                       <div class="chart-tooltip" id="cr-hex-chart-tooltip"></div>
@@ -861,6 +957,21 @@
                   </section>
                   <div class="map-svg-viewport">
                     <svg id="cr-hex-map" role="img" aria-label="Hex cartogram of PM2.5 by local authority" data-region="London"></svg>
+                  </div>
+                  <div
+                    class="map-pollutant-unavailable"
+                    data-pollutant-unavailable-overlay
+                    data-map-kind="cr"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                    hidden
+                  >
+                    <p class="map-pollutant-unavailable-message">
+                      <span data-pollutant-unavailable-lead></span>
+                      <span data-pollutant-unavailable-names hidden></span>
+                      <span data-pollutant-unavailable-action></span>
+                    </p>
                   </div>
                   <div class="map-settings-panel" id="cr-map-settings-panel" role="dialog" aria-label="Sensor data settings">
                     <div class="map-settings-header">
@@ -920,8 +1031,12 @@
                     </button>
                   </div>
                   <!-- ── Floating legend pill (layout test) ── -->
-                  <div class="legend map-legend legend-pill">
-                    <span id="cr-legend-pollutant">PM2.5 (µg/m³)</span>
+                  <div class="map-legend-region">
+                    <div class="legend map-legend legend-pill">
+                      <div class="legend-title-line">
+                        <span id="cr-legend-pollutant">PM2.5 (µg/m³)</span>
+                        <span id="cr-legend-label"></span>
+                      </div>
                     <div
                       id="cr-legend-scale"
                       class="legend-scale"
@@ -942,7 +1057,7 @@
                       </div>
                       <span class="legend-value" id="cr-legend-max">-</span>
                     </div>
-                    <span id="cr-legend-label"></span>
+                    </div>
                   </div>
           <!-- inline sensor panel -->
           <div class="map-inline-sensor-panel" id="cr-map-inline-sensor-panel" aria-live="polite">
@@ -954,7 +1069,7 @@
                     <button type="button" class="sensor-title-icon-button" aria-label="Open sensor chart" title="Open sensor chart" disabled>
                       <img src="/images/UK-AQ-Sensor-Buttons-chart.svg" alt="" aria-hidden="true" />
                     </button>
-                    <div class="sensor-panel-title" id="cr-sensor-panel-title"></div>
+                    <div class="sensor-panel-title" id="cr-sensor-panel-title" data-hex-truncation data-hex-truncation-focusable="true"></div>
                   </span>
                   <svg id="cr-sensor-panel-hex-icon" viewBox="0 0 52 60" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M26 0L52 15V45L26 60L0 45V15L26 0Z" fill="currentColor"/>
@@ -964,12 +1079,35 @@
                 <div class="sensor-network-label" id="cr-sensor-panel-network-label"></div>
               </div>
               <div class="sensor-panel-count" id="cr-sensor-panel-count"></div>
-              <button type="button" class="sensor-panel-close" id="cr-sensor-panel-close" aria-label="Close sensor panel">
-                <img src="/images/Red-Square-Button-White-Cross-200x200.svg" alt="" aria-hidden="true" />
-              </button>
+              <div class="mobile-sensor-sort" hidden>
+                <label for="cr-sensor-mobile-sort">Sort</label>
+                <select id="cr-sensor-mobile-sort" aria-label="Sort sensors">
+                  <option value="pm25:desc">PM2.5 highest</option>
+                  <option value="pm25:asc">PM2.5 lowest</option>
+                  <option value="updated:desc">Newest observed</option>
+                  <option value="updated:asc">Oldest observed</option>
+                  <option value="sensor:asc">Sensor A–Z</option>
+                  <option value="sensor:desc">Sensor Z–A</option>
+                  <option value="network:asc">Network A–Z</option>
+                  <option value="network:desc">Network Z–A</option>
+                </select>
+              </div>
+              <div class="sensor-panel-header-actions">
+                <button type="button" class="sensor-panel-back" id="cr-sensor-panel-back-to-map" data-chart-back-to-map aria-label="Back to Hex Map, keep area selected" title="Back to Hex Map, keep area selected">
+                  <img class="sensor-panel-back-map-icon" src="/sidebar-images/uk-aq-hex-map-sidebar.svg" alt="" aria-hidden="true" />
+                  <img class="sensor-panel-back-arrow" src="/images/UK-AQ-back-arrow.svg" alt="" aria-hidden="true" />
+                </button>
+                <button type="button" class="sensor-panel-close" id="cr-sensor-panel-close" aria-label="Close sensor panel">
+                  <img src="/images/Red-Square-Button-White-Cross-200x200.svg" alt="" aria-hidden="true" />
+                </button>
+              </div>
             </div>
             <div class="map-inline-sensor-panel-body" id="cr-sensor-panel-body">
               <div class="details-empty" id="cr-details-empty">Select a local authority to see sensors.</div>
+              <div class="mobile-sensor-list-toolbar" data-mobile-sensor-list-toolbar hidden>
+                <div class="mobile-sensor-list-toolbar-select" data-mobile-sensor-select-mount></div>
+                <div class="mobile-sensor-list-toolbar-sort" data-mobile-sensor-sort-mount></div>
+              </div>
               <div class="sensor-table-wrap" id="cr-sensor-table-wrap" hidden>
                 <table class="sensor-table">
                   <thead>
@@ -983,13 +1121,19 @@
                       </th>
                       <th scope="col" class="sensor-chart-symbol-col" aria-label="Symbol"></th>
                       <th scope="col" class="sensor-col-sensor" data-sort-key="sensor" aria-sort="none">
-                        <button type="button" class="sort-header" data-sort-key="sensor" data-sort-type="alpha" title="Sort A→Z">
-                          <span class="sort-label">Sensor</span>
-                          <span class="sort-icon" aria-hidden="true"></span>
-                        </button>
+                        <div class="sensor-sort-header-stack">
+                          <button type="button" class="sort-header" data-sort-key="sensor" data-sort-type="alpha" title="Sort A→Z">
+                            <span class="sort-label">Sensor</span>
+                            <span class="sort-icon" aria-hidden="true"></span>
+                          </button>
+                          <button type="button" class="sort-header sort-header--network sort-header--narrow" data-sort-key="network" data-sort-type="alpha" title="Sort A→Z">
+                            <span class="sort-label">Network</span>
+                            <span class="sort-icon" aria-hidden="true"></span>
+                          </button>
+                        </div>
                       </th>
                       <th scope="col" class="sensor-col-network" data-sort-key="network" aria-sort="none">
-                        <button type="button" class="sort-header" data-sort-key="network" data-sort-type="alpha" title="Sort A→Z">
+                        <button type="button" class="sort-header sort-header--wide" data-sort-key="network" data-sort-type="alpha" title="Sort A→Z">
                           <span class="sort-label">Network</span>
                           <span class="sort-icon" aria-hidden="true"></span>
                         </button>
@@ -1013,6 +1157,24 @@
               </div>
             </div>
           </div>
+                </div>
+                <div class="mobile-map-controls-row" data-mobile-map-controls-row data-map-kind="cr">
+                  <div class="mobile-map-controls-row--primary">
+                    <div class="mobile-map-controls mobile-map-controls--left" data-mobile-map-controls-left></div>
+                    <div class="mobile-map-controls mobile-map-controls--right" data-mobile-map-controls-right></div>
+                  </div>
+                  <div class="mobile-map-networks-panel-mount" data-mobile-map-networks-panel></div>
+                  <div class="mobile-map-controls-row--secondary">
+                    <div class="mobile-map-controls mobile-map-controls--pollutant" data-mobile-map-controls-pollutant></div>
+                  </div>
+                  <div class="mobile-map-controls-row--tertiary">
+                    <div class="mobile-map-controls mobile-map-controls--region" data-mobile-map-controls-region></div>
+                  </div>
+                  <div class="mobile-map-search-mount" data-mobile-map-search></div>
+                  <div class="mobile-map-controls-row--utility">
+                    <div class="mobile-map-controls mobile-map-controls--centre" data-mobile-map-controls-centre></div>
+                    <div class="mobile-map-status-row" data-mobile-map-status-row aria-live="polite"></div>
+                  </div>
                 </div>
           <aside class="map-networks-dock" data-networks-dock hidden aria-hidden="true"></aside>
               </div>
@@ -1362,6 +1524,15 @@
             alt=""
             aria-hidden="true"
           />
+        </button>
+        <button
+          type="button"
+          class="networks-panel-close"
+          id="networks-panel-close"
+          aria-label="Close networks"
+          title="Close networks"
+        >
+          <img src="/images/Red-Square-Button-White-Cross-200x200.svg" alt="" aria-hidden="true" />
         </button>
       </div>
       <div class="network-dropdown-actions" role="group" aria-label="Network selection actions">

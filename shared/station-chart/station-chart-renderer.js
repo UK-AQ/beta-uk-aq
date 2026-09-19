@@ -17,6 +17,7 @@
   });
   const SERIES_COLOUR = "#3C78AC";
   const HOUR_MS = 60 * 60 * 1000;
+  const SYMBOL_CLIP_PADDING = 6;
 
   function nodeValue(value) {
     if (!value) return null;
@@ -30,9 +31,39 @@
       : "";
   }
 
-  function buildXAxis(d3, scale, rangeMs) {
+  function chartMargins(width, height) {
+    const chartWidth = Math.max(0, Number(width) || 0);
+    const marginTop = Math.max(52, Math.round(Math.max(0, Number(height) || 0) * 0.12));
+    if (chartWidth < 768) {
+      return {
+        top: marginTop,
+        right: chartWidth <= 360 ? 12 : chartWidth <= 480 ? 14 : 16,
+        bottom: 44,
+        left: chartWidth <= 360 ? 52 : chartWidth <= 480 ? 54 : 56,
+      };
+    }
+    return { top: marginTop, right: 24, bottom: 44, left: 72 };
+  }
+
+  function aqiSourceSymbolX(width, marginLeft) {
+    const chartWidth = Math.max(0, Number(width) || 0);
+    const leftwardOffset = chartWidth <= 767 ? 64 : chartWidth <= 960 ? 68 : 62;
+    return Math.max(10, marginLeft - leftwardOffset);
+  }
+
+  function xAxisTickCount(rangeMs, plotWidth) {
     const dayMs = 24 * HOUR_MS;
-    const tickCount = rangeMs <= dayMs ? 8 : rangeMs <= 7 * dayMs ? 7 : 6;
+    const normalCount = rangeMs <= dayMs ? 8 : rangeMs <= 7 * dayMs ? 7 : 6;
+    const availableWidth = Math.max(0, Number(plotWidth) || 0);
+    if (availableWidth < 340) return Math.min(normalCount, 4);
+    if (availableWidth < 480) return Math.min(normalCount, 5);
+    if (availableWidth < 620) return Math.min(normalCount, 6);
+    return normalCount;
+  }
+
+  function buildXAxis(d3, scale, rangeMs, plotWidth) {
+    const dayMs = 24 * HOUR_MS;
+    const tickCount = xAxisTickCount(rangeMs, plotWidth);
     const format = rangeMs <= dayMs
       ? d3.timeFormat("%H:%M")
       : rangeMs <= 7 * dayMs ? d3.timeFormat("%a %H:%M") : d3.timeFormat("%d %b");
@@ -170,7 +201,7 @@
     function dimensions(value = {}) {
       const svgEl = refs?.svgEl;
       return {
-        width: Math.max(320, Number(value.width) || svgEl?.clientWidth || 960),
+        width: Math.max(280, Number(value.width) || svgEl?.clientWidth || 960),
         height: Math.max(300, Number(value.height) || svgEl?.clientHeight || 390),
       };
     }
@@ -178,16 +209,21 @@
     function createFrame(state, requestedDimensions) {
       clearHover({ forgetPointer: true });
       const size = dimensions(requestedDimensions);
-      const marginTop = Math.max(52, Math.round(size.height * 0.12));
-      const margin = { top: marginTop, right: 24, bottom: 44, left: 72 };
+      const margin = chartMargins(size.width, size.height);
       const svg = refs.svg;
       progressBar = null;
       svg.selectAll("*").remove();
       svg.attr("viewBox", `0 0 ${size.width} ${size.height}`);
       const clipId = `${options.clipIdPrefix || "station-chart"}-${Math.random().toString(36).slice(2)}`;
-      svg.append("defs").append("clipPath").attr("id", clipId).append("rect")
+      const symbolClipId = `${clipId}-symbols`;
+      const defs = svg.append("defs");
+      defs.append("clipPath").attr("id", clipId).append("rect")
         .attr("x", margin.left).attr("y", margin.top)
         .attr("width", Math.max(0, size.width - margin.left - margin.right))
+        .attr("height", Math.max(0, size.height - margin.top - margin.bottom));
+      defs.append("clipPath").attr("id", symbolClipId).append("rect")
+        .attr("x", margin.left - SYMBOL_CLIP_PADDING).attr("y", margin.top)
+        .attr("width", Math.max(0, size.width - margin.left - margin.right + (2 * SYMBOL_CLIP_PADDING)))
         .attr("height", Math.max(0, size.height - margin.top - margin.bottom));
       const xScale = d3.scaleTime()
         .domain([state.range.startDate, state.range.endDate])
@@ -203,11 +239,11 @@
       const guidelineLabel = svg.append("text").attr("class", "chart-guideline-label")
         .attr("text-anchor", "end").style("opacity", 0);
       const series = svg.append("g").attr("class", "chart-series-layers").attr("clip-path", `url(#${clipId})`);
-      const symbols = svg.append("g").attr("class", "chart-series-symbols").attr("clip-path", `url(#${clipId})`);
+      const symbols = svg.append("g").attr("class", "chart-series-symbols").attr("clip-path", `url(#${symbolClipId})`);
       const empty = svg.append("g").attr("class", "chart-empty-state");
       const overlay = svg.append("rect").attr("class", "chart-overlay")
         .attr("fill", "transparent").style("pointer-events", "all");
-      frame = { ...size, margin, clipId, svg, xScale, yScale, aqi, xAxis, yAxis, yLabel, guideline, guidelineLabel, series, symbols, empty, overlay };
+      frame = { ...size, margin, clipId, symbolClipId, svg, xScale, yScale, aqi, xAxis, yAxis, yLabel, guideline, guidelineLabel, series, symbols, empty, overlay };
       layoutFrame(state);
       installTooltip();
       return frame;
@@ -219,6 +255,10 @@
       frame.svg.select(`#${frame.clipId} rect`)
         .attr("x", margin.left).attr("y", margin.top)
         .attr("width", Math.max(0, width - margin.left - margin.right))
+        .attr("height", Math.max(0, height - margin.top - margin.bottom));
+      frame.svg.select(`#${frame.symbolClipId} rect`)
+        .attr("x", margin.left - SYMBOL_CLIP_PADDING).attr("y", margin.top)
+        .attr("width", Math.max(0, width - margin.left - margin.right + (2 * SYMBOL_CLIP_PADDING)))
         .attr("height", Math.max(0, height - margin.top - margin.bottom));
       frame.xScale.range([margin.left, width - margin.right]);
       frame.yScale.range([height - margin.bottom, margin.top]);
@@ -315,7 +355,8 @@
         current.xScale.domain([state.range.startDate, state.range.endDate]);
         current.yScale.domain(observationDomain(state));
       }
-      current.xAxis.call(buildXAxis(d3, current.xScale, state.range.endMs - state.range.startMs));
+      const plotWidth = Math.max(0, current.width - current.margin.left - current.margin.right);
+      current.xAxis.call(buildXAxis(d3, current.xScale, state.range.endMs - state.range.startMs, plotWidth));
       current.yAxis.call(d3.axisLeft(current.yScale).ticks(5).tickSizeOuter(0));
       const guideline = Number(state.guideline?.limit_value);
       if (Number.isFinite(guideline)) {
@@ -430,7 +471,7 @@
       });
       const symbol = sourceIndex >= 0 ? ChartCore.getSymbolPathData(sourceIndex, 130) : null;
       if (symbol) current.aqi.append("path").attr("class", "aqi-band-source-symbol")
-        .attr("d", symbol).attr("transform", `translate(${current.margin.left - 62},24)`)
+        .attr("d", symbol).attr("transform", `translate(${aqiSourceSymbolX(current.width, current.margin.left)},24)`)
         .attr("fill", SERIES_COLOUR).attr("stroke", "#fff").attr("stroke-width", 1.35);
     }
 
@@ -745,6 +786,8 @@
 
   return {
     createStationChartRenderer,
+    chartMargins,
+    xAxisTickCount,
     getSeriesValueAtDate,
     findNearestSeriesAtPointer,
     DAQI_COLORS,
