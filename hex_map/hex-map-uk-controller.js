@@ -5,6 +5,7 @@ import networkController from "./hex-map-network-controller.js";
 import summaryPresenter from "./hex-map-summary.js";
 import scrollAffordances from "./hex-map-scroll-affordances.js";
 import truncation from "./hex-map-truncation.js";
+import mobileMapLayout from "./hex-map-mobile-map-layout.js";
 import "./hex-map-station-chart-adapter-module.js";
 import search from "./hex-map-search.js";
 
@@ -2292,6 +2293,11 @@ function initHexMapUkController(root) {
         updateSummary();
         updateDetailsPanel();
         updateSelectedHexViewportShift();
+        if (cell) {
+          mobileMapLayout?.frameSelectedArea?.("uk");
+        } else {
+          mobileMapLayout?.cancelViewportFrame?.();
+        }
       }
 
       function updateSelectedHexViewportShift() {

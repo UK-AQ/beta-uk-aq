@@ -698,11 +698,13 @@
       createController(mapKey);
       void state.controller.setRange(resolveRange(state.rangeLabel, selectedEntries()));
       state.pollutantAdapter.sync({ ...context, entries: state.visibleEntries }, context.dataStatus);
+      root.UkAqHexMapMobileMapLayout?.frameChart?.(mapKey);
       return true;
     }
 
     function exit(options = {}) {
       const previousMapKey = chartMapKey();
+      root.UkAqHexMapMobileMapLayout?.cancelViewportFrame?.();
       state.pollutantAdapter?.destroy?.();
       state.pollutantContextController?.destroy?.();
       state.controller?.destroy?.();
@@ -741,6 +743,7 @@
         state.selectedIds.add(id);
       }
       void commitSelection();
+      root.UkAqHexMapMobileMapLayout?.frameChart?.(chartMapKey());
       return true;
     }
 
@@ -768,6 +771,7 @@
         }
       } else return false;
       void commitSelection();
+      root.UkAqHexMapMobileMapLayout?.frameChart?.(chartMapKey());
       return true;
     }
 
