@@ -254,6 +254,22 @@
     return 'desktop';
   }
 
+  function isConstrainedSidebarMode() {
+    const width = window.innerWidth;
+    if (width < 768) return false;
+    if (document.body.classList.contains('hex-map-page')) {
+      return width < 920;
+    }
+    if (document.body.classList.contains('home-page')) {
+      return width < 1100;
+    }
+    return false;
+  }
+
+  function isSidebarHoverMode() {
+    return getBreakpoint() !== 'mobile';
+  }
+
   function isHomePage() {
     const p = location.pathname;
     return p === '/' || p === '/index.html' || p === '';
@@ -276,7 +292,7 @@
     clearTimeout(autoCollapseTimer);
     autoCollapseTimer = setTimeout(() => {
       if (
-        getBreakpoint() === 'desktop'
+        isSidebarHoverMode()
         && !pinnedOpenDesktop
         && getState() === EXPANDED
         && !isHoverActive()
@@ -289,8 +305,10 @@
   function updateHamburgerIcon(btn) {
     const img = btn?.querySelector('img');
     if (!img) return;
-    const mobileOpen = getBreakpoint() === 'mobile' && document.body.classList.contains('uk-aq-drawer-open');
-    const shouldShowOn = mobileOpen || (getBreakpoint() !== 'mobile' && pinnedOpenDesktop);
+    const mobileDrawer = getBreakpoint() === 'mobile';
+    const drawerOpen = mobileDrawer && document.body.classList.contains('uk-aq-drawer-open');
+    const shouldShowOn = drawerOpen
+      || (!mobileDrawer && !isConstrainedSidebarMode() && pinnedOpenDesktop);
     const target = `${location.origin}${shouldShowOn ? SIDEBAR_ICON_ON : SIDEBAR_ICON_OFF}`;
     if (img.src !== target) img.src = target;
   }
@@ -324,6 +342,18 @@
     body[data-sidebar-state="collapsed"] { padding-left: 0; }
     body[data-sidebar-state="mini"]      { padding-left: var(--uk-aq-sidebar-mini-w); }
     body[data-sidebar-state="drawer"]    { padding-left: 0; }
+
+    @media (min-width: 768px) and (max-width: 919px) {
+      body.hex-map-page[data-sidebar-state="expanded"] {
+        padding-left: var(--uk-aq-sidebar-mini-w);
+      }
+    }
+
+    @media (min-width: 768px) and (max-width: 1099px) {
+      body.home-page[data-sidebar-state="expanded"] {
+        padding-left: var(--uk-aq-sidebar-mini-w);
+      }
+    }
 
     /* ── Sidebar panel ── */
     #uk-aq-sidebar {
@@ -391,9 +421,25 @@
     @media (max-width: 767px) {
       #uk-aq-hamburger { position: absolute; }
     }
-    #uk-aq-hamburger:hover {
+    #uk-aq-hamburger:hover:not(:disabled) {
       transform: translateY(-1px);
       box-shadow: 0 8px 14px rgba(20,34,37,0.12);
+    }
+    @media (min-width: 768px) and (max-width: 919px) {
+      body.hex-map-page #uk-aq-hamburger:disabled {
+        cursor: default;
+        pointer-events: none;
+        transform: none;
+        box-shadow: none;
+      }
+    }
+    @media (min-width: 768px) and (max-width: 1099px) {
+      body.home-page #uk-aq-hamburger:disabled {
+        cursor: default;
+        pointer-events: none;
+        transform: none;
+        box-shadow: none;
+      }
     }
     #uk-aq-hamburger img { width: 44px; height: 44px; object-fit: contain; display: block; }
 
@@ -781,8 +827,12 @@
     const restoreExpandedForNavigation = consumeSidebarNavHandoff();
     document.body.style.transition = 'none';
     pinnedOpenDesktop = readPinnedSidebarPreference();
+    if (isConstrainedSidebarMode() && pinnedOpenDesktop) {
+      pinnedOpenDesktop = false;
+      writePinnedSidebarPreference(false);
+    }
     setState(bp === 'mobile' ? DRAWER : (
-      pinnedOpenDesktop || (bp === 'desktop' && restoreExpandedForNavigation)
+      pinnedOpenDesktop || restoreExpandedForNavigation
         ? EXPANDED
         : MINI
     ));
@@ -809,6 +859,7 @@
     const btn = document.createElement('button');
     btn.id = 'uk-aq-hamburger';
     btn.setAttribute('aria-label', 'Toggle navigation');
+    btn.disabled = isConstrainedSidebarMode();
     btn.innerHTML = `<img src="${location.origin}${SIDEBAR_ICON_OFF}" alt="Menu">`;
 
     // Shared top-right UK AQ home logo
@@ -885,22 +936,31 @@
   // ─── Events ───────────────────────────────────────────────────────────────────
   function bindEvents(btn, overlay) {
     const sidebar = document.getElementById('uk-aq-sidebar');
+    let wasConstrainedSidebarMode = isConstrainedSidebarMode();
     const isSidebarChromeHovered = () => (
       sidebar.matches(':hover') || btn.matches(':hover')
     );
     const handleDesktopHoverEnter = () => {
       clearTimeout(autoCollapseTimer);
-      if (getBreakpoint() === 'desktop' && !pinnedOpenDesktop && getState() === MINI) {
+      if (
+        isSidebarHoverMode()
+        && !pinnedOpenDesktop
+        && getState() === MINI
+      ) {
         setState(EXPANDED);
       }
     };
     const handleDesktopHoverLeave = () => {
-      if (!pinnedOpenDesktop && getBreakpoint() === 'desktop' && getState() === EXPANDED) {
+      if (
+        !pinnedOpenDesktop
+        && isSidebarHoverMode()
+        && getState() === EXPANDED
+      ) {
         scheduleAutoCollapse(isSidebarChromeHovered);
       }
     };
 
-    // Keep a hover-expanded desktop sidebar visually open across same-tab
+    // Keep a hover-expanded non-mobile sidebar visually open across same-tab
     // internal navigation. The destination consumes this one-time handoff.
     sidebar.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -910,8 +970,7 @@
       if (link.target && link.target !== '_self') return;
       if (link.origin !== location.origin) return;
       if (
-        getBreakpoint() === 'desktop'
-        && !pinnedOpenDesktop
+        isSidebarHoverMode()
         && getState() === EXPANDED
       ) {
         rememberSidebarNavHandoff();
@@ -921,6 +980,9 @@
     // Hamburger toggle
     btn.addEventListener('click', () => {
       const bp = getBreakpoint();
+      if (isConstrainedSidebarMode()) {
+        return;
+      }
       if (bp === 'mobile') {
         document.body.classList.toggle('uk-aq-drawer-open');
       } else {
@@ -928,7 +990,7 @@
         pinnedOpenDesktop = !pinnedOpenDesktop;
         writePinnedSidebarPreference(pinnedOpenDesktop);
         setState(
-          pinnedOpenDesktop || (bp === 'desktop' && isSidebarChromeHovered())
+          pinnedOpenDesktop || isSidebarChromeHovered()
             ? EXPANDED
             : MINI
         );
@@ -942,7 +1004,7 @@
       updateHamburgerIcon(btn);
     });
 
-    // Desktop hover-expand treats the sidebar and hamburger as one hover region.
+    // Non-mobile hover-expand treats the sidebar and hamburger as one hover region.
     sidebar.addEventListener('mouseenter', handleDesktopHoverEnter);
     btn.addEventListener('mouseenter', handleDesktopHoverEnter);
 
@@ -953,19 +1015,33 @@
     // Responsive resize
     window.addEventListener('resize', () => {
       const bp = getBreakpoint();
+      const constrainedSidebarMode = isConstrainedSidebarMode();
       clearTimeout(autoCollapseTimer);
-      if (bp === 'tablet') {
-        setState(pinnedOpenDesktop ? EXPANDED : MINI);
+      if (constrainedSidebarMode) {
+        if (pinnedOpenDesktop) {
+          pinnedOpenDesktop = false;
+          writePinnedSidebarPreference(false);
+        }
+        document.body.classList.remove('uk-aq-drawer-open');
+        if (!wasConstrainedSidebarMode) {
+          setState(isSidebarChromeHovered() ? EXPANDED : MINI);
+        } else if (getState() !== MINI && getState() !== EXPANDED) {
+          setState(MINI);
+        }
+      } else if (bp === 'tablet') {
+        setState(pinnedOpenDesktop || isSidebarChromeHovered() ? EXPANDED : MINI);
         document.body.classList.remove('uk-aq-drawer-open');
       } else if (bp === 'mobile') {
         setState(DRAWER);
         document.body.classList.remove('uk-aq-drawer-open');
       } else if (getState() === MINI || getState() === DRAWER || getState() === COLLAPSED) {
         document.body.classList.remove('uk-aq-drawer-open');
-        setState(pinnedOpenDesktop ? EXPANDED : MINI);
+        setState(pinnedOpenDesktop || isSidebarChromeHovered() ? EXPANDED : MINI);
       } else {
-        setState(pinnedOpenDesktop ? EXPANDED : MINI);
+        setState(pinnedOpenDesktop || isSidebarChromeHovered() ? EXPANDED : MINI);
       }
+      btn.disabled = constrainedSidebarMode;
+      wasConstrainedSidebarMode = constrainedSidebarMode;
       updateHamburgerIcon(btn);
     });
   }
