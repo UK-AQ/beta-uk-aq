@@ -8036,7 +8036,7 @@
           border-radius: 0;
           background: transparent;
           box-shadow: none;
-          font-size: 0.82rem;
+          font-size: clamp(0.82rem, 4vw, 0.95rem);
         }
 
         .hex-map-page .mobile-map-controls--left .popover-trigger::before,
@@ -8431,6 +8431,10 @@
           border: 1px solid var(--line);
           border-radius: 9px;
           background: rgba(255, 255, 255, 0.72);
+        }
+
+        body.hex-map-page.mobile-map-controls-active .mobile-map-controls--region #toolbar-region-label {
+          font-size: clamp(0.85rem, 4.5vw, 1.15rem);
         }
 
         body.hex-map-page.mobile-map-controls-active .mobile-map-controls--region .popover-trigger::before {
