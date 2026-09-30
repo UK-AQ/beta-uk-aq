@@ -5,7 +5,7 @@ import networkController from "./hex-map-network-controller.js";
 import summaryPresenter from "./hex-map-summary.js";
 import scrollAffordances from "./hex-map-scroll-affordances.js";
 import truncation from "./hex-map-truncation.js";
-import mobileMapLayout from "./hex-map-mobile-map-layout.js";
+import viewportFraming from "./hex-map-viewport-framing.js";
 import "./hex-map-station-chart-adapter-module.js";
 import search from "./hex-map-search.js";
 
@@ -14,27 +14,19 @@ function initHexMapUkController(root) {
 
       if (!root?.document || !document.body.classList.contains("hex-map-page")) return;
 
-      if (!pollutantDomain?.definitions || !networkDomain?.resolveCode || !networkController?.loadCatalog || !coordinator?.registerMap) {
+      if (!pollutantDomain?.definitions || !networkDomain?.resolveCode || !networkController?.loadCatalog || !networkController?.filterEligibleRows || !coordinator?.registerMap) {
         throw new Error("UK AQ shared domain/data modules must load before the Hex Map.");
       }
-      const PROJECT_REF_PLACEHOLDER = "zztjgmdiftqtdcrlfpvc";
-      const ANON_KEY_PLACEHOLDER = "sb_publishable_Cru7ACLoK8kKQdID5jPaDw_3RHvQNxO";
+
       const params = new URLSearchParams(window.location.search);
-      const projectRefParam = params.get("project_ref");
-      const anonKeyParam = params.get("anon_key");
+
       const cacheBaseParam = params.get("cache_base");
       const cacheBaseUrl = resolveCacheBaseUrl(cacheBaseParam);
       const cacheSessionParam = params.get("cache_session_url");
       const mapDateParam = params.get("map_date");
       const pconVersionParam = params.get("pcon_version");
       const initialMapSettings = coordinator.getMapSettings();
-      const inferredProjectRef = inferProjectRefFromHost();
-      const projectRef = PROJECT_REF_PLACEHOLDER.includes("__SUPABASE_PROJECT_REF__")
-        ? (projectRefParam || inferredProjectRef || "")
-        : PROJECT_REF_PLACEHOLDER;
-      const anonKey = ANON_KEY_PLACEHOLDER.includes("__SB_PUBLISHABLE_DEFAULT_KEY__")
-        ? (anonKeyParam || "")
-        : ANON_KEY_PLACEHOLDER;
+
       const cacheOrigin = cacheBaseUrl ? new URL(cacheBaseUrl).origin : "";
       const defaultCacheSessionUrl = cacheOrigin ? `${cacheOrigin}/api/aq/session/start` : "";
       const cacheSessionUrl = (cacheSessionParam || defaultCacheSessionUrl || "").trim();
@@ -52,9 +44,6 @@ function initHexMapUkController(root) {
         }
         return "";
       }
-      const POPULATION_URL = projectRef
-        ? `https://${projectRef}.supabase.co/functions/v1/uk_aq_population`
-        : "";
       let activePollutant = coordinator.getPollutant();
       const POLLUTANT_CACHE_TTL = 60 * 1000;
       const pollutantCache = new Map();
@@ -502,6 +491,33 @@ function initHexMapUkController(root) {
       let ukWasHidden = true;
       let ukBootstrapReady = false;
       let populationLookup = new Map();
+
+      // Supplementary static data: never await this from geometry, AQ or Refresh.
+      // Called once at controller initialisation; failures stay unavailable this page lifetime.
+      async function loadPopulation() {
+        try {
+          const response = await fetch("/data/population/pcon-latest.json");
+          if (!response.ok) return;
+          const payload = await response.json();
+          if (payload?.geo_type !== "PCON" || !Array.isArray(payload.data)
+              || payload.count !== payload.data.length) return;
+          const lookup = new Map();
+          for (const row of payload.data) {
+            const date = row?.reference_date;
+            if (typeof row?.geo_code !== "string" || !/^[EWSN]\d{8}$/.test(row.geo_code)
+                || lookup.has(row.geo_code)
+                || !Number.isSafeInteger(row.population_value) || row.population_value <= 0
+                || typeof date !== "string" || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(date)) return;
+            const parsed = new Date(`${date}T00:00:00Z`);
+            if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return;
+            lookup.set(row.geo_code, row);
+          }
+          populationLookup = lookup;
+          if (pinnedTooltipCell) refreshPinnedTooltip();
+        } catch {
+          // Missing/malformed population must not affect normal map operation.
+        }
+      }
       let selectedPconCode = null;
       let selectedCell = null;
       let areaRegionLookup = new Map();
@@ -669,14 +685,6 @@ function initHexMapUkController(root) {
         }
         window.location.assign(loginUrl);
         return true;
-      }
-
-      function inferProjectRefFromHost() {
-        const host = window.location.hostname || "";
-        if (host.endsWith(".supabase.co")) {
-          return host.split(".")[0];
-        }
-        return null;
       }
 
       function normalizeDateKey(value) {
@@ -1722,7 +1730,7 @@ function initHexMapUkController(root) {
       }
 
       function getNetworkRowsForWindow() {
-        const windowed = filterRowsByWindow(baseLatestRows);
+        const windowed = filterRowsByWindow(networkController.filterEligibleRows(baseLatestRows));
         return getRowsForActivePollutant(windowed);
       }
 
@@ -2294,9 +2302,9 @@ function initHexMapUkController(root) {
         updateDetailsPanel();
         updateSelectedHexViewportShift();
         if (cell) {
-          mobileMapLayout?.frameSelectedArea?.("uk");
+          viewportFraming?.frameSelectedArea?.("uk");
         } else {
-          mobileMapLayout?.cancelViewportFrame?.();
+          viewportFraming?.cancelViewportFrame?.("uk");
         }
       }
 
@@ -3215,7 +3223,7 @@ function initHexMapUkController(root) {
           return [];
         }
         const groups = new Map();
-        const scopedRows = getRowsForActivePollutant(rows);
+        const scopedRows = getRowsForActivePollutant(networkController.filterEligibleRows(rows));
         scopedRows.forEach((row, index) => {
           const pconCode = resolvePconCode(row);
           if (!pconCode) {
@@ -3292,17 +3300,19 @@ function initHexMapUkController(root) {
           return;
         }
         const networkCodes = getActiveNetworkCodes();
+        const eligibleLatest = networkController.filterEligibleRows(baseLatestRows);
+        const eligibleLatestAllWindow = networkController.filterEligibleRows(baseLatestRowsAllWindow);
         let filteredLatest = [];
         if (networkCodes === null) {
-          filteredLatest = baseLatestRows;
+          filteredLatest = eligibleLatest;
         } else if (networkCodes.size > 0) {
-          filteredLatest = filterLatestRowsByNetwork(baseLatestRows, networkCodes);
+          filteredLatest = filterLatestRowsByNetwork(eligibleLatest, networkCodes);
         }
         let filteredLatestAllWindow = [];
         if (networkCodes === null) {
-          filteredLatestAllWindow = baseLatestRowsAllWindow;
+          filteredLatestAllWindow = eligibleLatestAllWindow;
         } else if (networkCodes.size > 0) {
-          filteredLatestAllWindow = filterLatestRowsByNetwork(baseLatestRowsAllWindow, networkCodes);
+          filteredLatestAllWindow = filterLatestRowsByNetwork(eligibleLatestAllWindow, networkCodes);
         }
         scopedLatestRows = filteredLatest;
         scopedLatestRowsAllWindow = filteredLatestAllWindow;
@@ -3325,13 +3335,13 @@ function initHexMapUkController(root) {
         const regionLabel = cell.region_name || cell.region_code || "Unknown region";
         const pollutantLabel = getPollutantLabel(activePollutant);
         const pollutantUnits = getPollutantUnits(activePollutant);
-        const populationEntry = populationLookup.get(cell.pcon_code);
+        const populationEntry = activeMap.version === "2024"
+          ? populationLookup.get(cell.pcon_code) : null;
         const populationValue = normalizeNumber(populationEntry?.population_value);
-        const populationDate = parseDate(populationEntry?.reference_date);
-        const populationYear = populationDate ? populationDate.getFullYear() : null;
-        const populationLabel = populationValue === null
+        const populationYear = populationEntry?.reference_date.slice(0, 4);
+        const populationLabel = populationValue === null || !populationYear
           ? "Population: n/a"
-          : `Population${populationYear ? ` (${populationYear})` : ""}: ${formatNumber(populationValue)}`;
+          : `Population: ${formatNumber(populationValue)} (${populationYear})`;
         const valueLabel = Number.isFinite(metricValue)
           ? `${formatValue(metricValue)} ${pollutantUnits}`
           : `No ${pollutantLabel} data`;
@@ -3546,7 +3556,6 @@ function initHexMapUkController(root) {
           errorEl.hidden = true;
         }
         latestPollutant = null;
-        populationLookup = new Map();
         if (!REST_URL) {
           chartDataStatus = "failed";
           if (errorEl) {
@@ -3613,14 +3622,7 @@ function initHexMapUkController(root) {
           if (latestEtag) {
             latestHeaders["If-None-Match"] = latestEtag;
           }
-          // const populationUrl = POPULATION_URL ? new URL(POPULATION_URL) : null;
-          // if (populationUrl) {
-          //   populationUrl.searchParams.set("geo_type", "PCON");
-          //   if (mapDateKey) {
-          //     populationUrl.searchParams.set("reference_date", mapDateKey);
-          //   }
-          //   populationUrl.searchParams.set("limit", "2000");
-          // }
+
           const hexRequest = fetch(HEX_DATA_URL);
           const pconRequest = fetchCacheApi(pconUrl.toString(), {
             headers: pconHeaders,
@@ -3646,15 +3648,7 @@ function initHexMapUkController(root) {
               headers: latestAllHeaders,
             }).catch(() => null);
           }
-          // const populationRequest = populationUrl
-          //   ? fetch(populationUrl.toString(), {
-          //     headers: {
-          //       Authorization: `Bearer ${anonKey}`,
-          //       apikey: anonKey,
-          //     },
-          //   }).catch(() => null)
-          //   : Promise.resolve(null);
-          const populationRequest = Promise.resolve(null);
+
           const hexResponse = await hexRequest;
           if (isStale()) {
             return;
@@ -3675,11 +3669,10 @@ function initHexMapUkController(root) {
               renderMapIfReady();
             }
           });
-          const [pconResponse, latestResponse, latestAllResponse, populationResponse] = await Promise.all([
+          const [pconResponse, latestResponse, latestAllResponse] = await Promise.all([
             pconRequest,
             latestRequest,
             latestAllRequest,
-            populationRequest,
           ]);
           if (isStale()) {
             return;
@@ -3829,23 +3822,6 @@ function initHexMapUkController(root) {
             TOTAL_PCON_COUNT,
             "constituencies",
           );
-          if (populationResponse && populationResponse.ok) {
-            const populationPayload = await populationResponse.json();
-            const populationRows = Array.isArray(populationPayload)
-              ? populationPayload
-              : populationPayload?.data || [];
-            const lookup = new Map();
-            populationRows.forEach((row) => {
-              const code = row?.geo_code;
-              if (!code || lookup.has(code)) {
-                return;
-              }
-              lookup.set(code, row);
-            });
-            populationLookup = lookup;
-          } else {
-            populationLookup = new Map();
-          }
           chartDataStatus = latestPollutant === requestPollutant ? "ready" : "failed";
           applyNetworkFilters();
           markHexMapTiming(timingId, "colored-ready");
@@ -4142,9 +4118,10 @@ function initHexMapUkController(root) {
       }
 
       function buildSensorSearchRecords() {
-        const rowsForSearch = scopedLatestRowsAllWindow.length
+        const candidateRows = scopedLatestRowsAllWindow.length
           ? scopedLatestRowsAllWindow
           : (scopedLatestRows.length ? scopedLatestRows : baseLatestRowsAllWindow.length ? baseLatestRowsAllWindow : baseLatestRows);
+        const rowsForSearch = networkController.filterEligibleRows(candidateRows);
         const recordsByKey = new Map();
         rowsForSearch.forEach((row, index) => {
           const stationId = String(resolveStationKey(row) || `uk:${index}`);
@@ -4325,11 +4302,13 @@ function initHexMapUkController(root) {
           if (!Number.isFinite(value)) return null;
           return colorScale(value);
         },
-        getPconMetricValue: (pconCode) => getMetricValue(basePconLookup.get(pconCode)),
+        getPconMetricValue: (pconCode) => getMetricValue(pconLookup.get(pconCode)),
         applyColorScale: (value) => colorScale ? colorScale(value) : null,
         getSensorCurrentColor: (stationId) => {
           if (!colorScale) return null;
-          const allRows = scopedLatestRows.length ? scopedLatestRows : baseLatestRows;
+          const allRows = networkController.filterEligibleRows(
+            scopedLatestRows.length ? scopedLatestRows : baseLatestRows,
+          );
           const pollutantRows = getRowsForActivePollutant(allRows);
           const targetStationId = String(stationId || "");
           const candidates = pollutantRows.filter((r) => String(resolveStationKey(r) || "") === targetStationId);
@@ -4359,7 +4338,8 @@ function initHexMapUkController(root) {
           setColorScale(settings.colorScale, { coordinated: true });
           setWindow(settings.window, { coordinated: true });
         },
-        activate: () => {
+        activate: ({ changed }) => {
+          if (changed) viewportFraming?.cancelViewportFrame?.();
           ukController.render();
           ukController.restoreNetworks();
           search?.preloadInactiveMap?.("uk");
@@ -4367,6 +4347,7 @@ function initHexMapUkController(root) {
         },
       });
       networkController.registerScope("uk", () => applyNetworkFilters());
+      if (activeMap.version === "2024") void loadPopulation();
       return ukController;
 }
 

@@ -6,7 +6,7 @@ import urlState from "./hex-map-url-state.js";
 import summary from "./hex-map-summary.js";
 import scrollAffordances from "./hex-map-scroll-affordances.js";
 import truncation from "./hex-map-truncation.js";
-import mobileMapLayout from "./hex-map-mobile-map-layout.js";
+import viewportFraming from "./hex-map-viewport-framing.js";
 import "./hex-map-station-chart-adapter-module.js";
 import search from "./hex-map-search.js";
 import ukController from "./hex-map-uk-controller.js";
@@ -19,7 +19,7 @@ function initHexMapCrController() {
   if (!root) {
     return;
   }
-  if (!pollutantDomain?.definitions || !networkDomain?.resolveCode || !networkController?.loadCatalog || !coordinator?.registerMap || !urlState?.getInitialCrRegion) {
+  if (!pollutantDomain?.definitions || !networkDomain?.resolveCode || !networkController?.loadCatalog || !networkController?.filterEligibleRows || !coordinator?.registerMap || !urlState?.getInitialCrRegion) {
     throw new Error("UK AQ shared domain/data modules must load before the C&R Hex Map.");
   }
   const ID_PREFIX = "cr-";
@@ -58,20 +58,13 @@ function initHexMapCrController() {
   }
 
 		      const params = new URLSearchParams(window.location.search);
-		      const projectRefParam = params.get("project_ref");
-		      const anonKeyParam = params.get("anon_key");
+
 		      const cacheBaseParam = params.get("cache_base");
 		      const cacheBaseUrl = resolveCacheBaseUrl(cacheBaseParam);
 		      const cacheSessionParam = params.get("cache_session_url");
 	      const mapDateParam = params.get("map_date");
 	      const laVersionParam = params.get("la_version");
-      const inferredProjectRef = inferProjectRefFromHost();
-      const projectRef = PROJECT_REF_PLACEHOLDER.includes("__SUPABASE_PROJECT_REF__")
-        ? (projectRefParam || inferredProjectRef || "")
-        : PROJECT_REF_PLACEHOLDER;
-	      const anonKey = ANON_KEY_PLACEHOLDER.includes("__SB_PUBLISHABLE_DEFAULT_KEY__")
-	        ? (anonKeyParam || "")
-	        : ANON_KEY_PLACEHOLDER;
+
 	      const cacheOrigin = cacheBaseUrl ? new URL(cacheBaseUrl).origin : "";
 	      const defaultCacheSessionUrl = cacheOrigin ? `${cacheOrigin}/api/aq/session/start` : "";
 	      const cacheSessionUrl = (cacheSessionParam || defaultCacheSessionUrl || "").trim();
@@ -89,9 +82,6 @@ function initHexMapCrController() {
         }
         return "";
       }
-      const POPULATION_URL = projectRef
-        ? `https://${projectRef}.supabase.co/functions/v1/uk_aq_population`
-        : "";
       let activePollutant = coordinator.getPollutant();
       const POLLUTANT_CACHE_TTL = 60 * 1000;
       const pollutantCache = new Map();
@@ -583,6 +573,32 @@ function initHexMapCrController() {
       let crWasHidden = true;
       let crBootstrapReady = false;
       let populationLookup = new Map();
+
+      // Supplementary static data: never await this from geometry, AQ or Refresh.
+      // Called once at controller initialisation; failures stay unavailable this page lifetime.
+      async function loadPopulation() {
+        try {
+          const response = await fetch("/data/population/lad-latest.json");
+          if (!response.ok) return;
+          const payload = await response.json();
+          if (payload?.geo_type !== "LAD" || !Array.isArray(payload.data)
+              || payload.count !== payload.data.length) return;
+          const lookup = new Map();
+          for (const row of payload.data) {
+            const date = row?.reference_date;
+            if (typeof row?.geo_code !== "string" || !/^[EWSN]\d{8}$/.test(row.geo_code)
+                || lookup.has(row.geo_code)
+                || !Number.isSafeInteger(row.population_value) || row.population_value <= 0
+                || typeof date !== "string" || !/^[1-9]\d{3}-\d{2}-\d{2}$/.test(date)) return;
+            const parsed = new Date(`${date}T00:00:00Z`);
+            if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return;
+            lookup.set(row.geo_code, row);
+          }
+          populationLookup = lookup;
+        } catch {
+          // Missing/malformed population must not affect normal map operation.
+        }
+      }
 	      let selectedAreaCode = null;
 	      let selectedCell = null;
 	      let pendingSelectedAreaCode = null;
@@ -766,14 +782,6 @@ function initHexMapCrController() {
           }
           setActiveRegion(nextRegion, { updateUrl: true });
         });
-      }
-
-      function inferProjectRefFromHost() {
-        const host = window.location.hostname || "";
-        if (host.endsWith(".supabase.co")) {
-          return host.split(".")[0];
-        }
-        return null;
       }
 
       function normalizeDateKey(value) {
@@ -1480,7 +1488,7 @@ function initHexMapCrController() {
       }
 
       function getNetworkRowsForWindow() {
-        const windowed = filterRowsByWindow(baseLatestRows);
+        const windowed = filterRowsByWindow(networkController.filterEligibleRows(baseLatestRows));
         return getRowsForActivePollutant(windowed);
       }
 
@@ -2075,9 +2083,9 @@ function initHexMapCrController() {
         updateDetailsPanel();
         updateSelectedHexViewportShift();
         if (cell) {
-          mobileMapLayout?.frameSelectedArea?.("cr");
+          viewportFraming?.frameSelectedArea?.("cr");
         } else {
-          mobileMapLayout?.cancelViewportFrame?.();
+          viewportFraming?.cancelViewportFrame?.("cr");
         }
       }
 
@@ -3434,7 +3442,7 @@ function initHexMapCrController() {
           return [];
         }
         const groups = new Map();
-        const scopedRows = getRowsForActivePollutant(rows);
+        const scopedRows = getRowsForActivePollutant(networkController.filterEligibleRows(rows));
         scopedRows.forEach((row, index) => {
           const areaCode = resolveAreaCode(row);
           if (!areaCode) {
@@ -3512,17 +3520,19 @@ function initHexMapCrController() {
           return;
         }
         const networkCodes = getActiveNetworkCodes();
+        const eligibleLatest = networkController.filterEligibleRows(baseLatestRows);
+        const eligibleLatestAllWindow = networkController.filterEligibleRows(baseLatestRowsAllWindow);
         let filteredLatest = [];
         if (networkCodes === null) {
-          filteredLatest = baseLatestRows;
+          filteredLatest = eligibleLatest;
         } else if (networkCodes.size > 0) {
-          filteredLatest = filterLatestRowsByNetwork(baseLatestRows, networkCodes);
+          filteredLatest = filterLatestRowsByNetwork(eligibleLatest, networkCodes);
         }
         let filteredLatestAllWindow = [];
         if (networkCodes === null) {
-          filteredLatestAllWindow = baseLatestRowsAllWindow;
+          filteredLatestAllWindow = eligibleLatestAllWindow;
         } else if (networkCodes.size > 0) {
-          filteredLatestAllWindow = filterLatestRowsByNetwork(baseLatestRowsAllWindow, networkCodes);
+          filteredLatestAllWindow = filterLatestRowsByNetwork(eligibleLatestAllWindow, networkCodes);
         }
         scopedLatestRows = filteredLatest;
         scopedLatestRowsAllWindow = filteredLatestAllWindow;
@@ -3652,11 +3662,10 @@ function initHexMapCrController() {
             const pollutantUnits = getPollutantUnits(activePollutant);
             const populationEntry = areaCode ? populationLookup.get(areaCode) : null;
             const populationValue = normalizeNumber(populationEntry?.population_value);
-            const populationDate = parseDate(populationEntry?.reference_date);
-            const populationYear = populationDate ? populationDate.getFullYear() : null;
-            const populationLabel = populationValue === null
+            const populationYear = populationEntry?.reference_date.slice(0, 4);
+            const populationLabel = populationValue === null || !populationYear
               ? "Population: n/a"
-              : `Population${populationYear ? ` (${populationYear})` : ""}: ${formatNumber(populationValue)}`;
+              : `Population: ${formatNumber(populationValue)} (${populationYear})`;
             const valueLabel = Number.isFinite(metricValue)
               ? `${formatValue(metricValue)} ${pollutantUnits}`
               : `No ${pollutantLabel} data`;
@@ -3726,6 +3735,7 @@ function initHexMapCrController() {
           }
           return;
         }
+        viewportFraming?.cancelViewportFrame?.("cr");
         activeRegion = normalized;
         urlState.noteCrRegion(normalized);
         const crSvgNode = svg.node();
@@ -3768,7 +3778,6 @@ function initHexMapCrController() {
           errorEl.textContent = "";
           errorEl.hidden = true;
         }
-        populationLookup = new Map();
 	        const hasCredentials = Boolean(REST_URL) && Boolean(cacheSessionUrl);
 	        const canLoadData = hasCredentials;
 	        if (!hasCredentials) {
@@ -3791,7 +3800,7 @@ function initHexMapCrController() {
           let hasMatchingLaState = false;
           let laRequestSince = null;
           let latestPromise = Promise.resolve(null);
-          let populationPromise = Promise.resolve(null);
+
           if (canLoadData) {
             const laUrl = new URL(REST_URL);
             if (activeLaVersion) {
@@ -3843,14 +3852,7 @@ function initHexMapCrController() {
 	            if (latestEtag) {
 	              latestHeaders["If-None-Match"] = latestEtag;
 	            }
-            // const populationUrl = POPULATION_URL ? new URL(POPULATION_URL) : null;
-            // if (populationUrl) {
-            //   populationUrl.searchParams.set("geo_type", "LAD");
-            //   if (mapDateKey) {
-            //     populationUrl.searchParams.set("reference_date", mapDateKey);
-            //   }
-            //   populationUrl.searchParams.set("limit", "2000");
-            // }
+
 	            laPromise = fetchCacheApi(laUrl.toString(), {
 	              headers: laHeaders,
 	            }).catch(() => null);
@@ -3876,14 +3878,7 @@ function initHexMapCrController() {
               }).catch(() => null);
             }
             latestPromise = Promise.all([latestPromise, latestAllPromise]).then(([latest, latestAll]) => ({ latest, latestAll }));
-            // populationPromise = populationUrl
-            //   ? fetch(populationUrl.toString(), {
-            //     headers: {
-            //       Authorization: `Bearer ${anonKey}`,
-            //       apikey: anonKey,
-            //     },
-            //   }).catch(() => null)
-            //   : Promise.resolve(null);
+
           }
           const hexResponse = await hexPromise;
           if (isStale()) {
@@ -3902,10 +3897,9 @@ function initHexMapCrController() {
               renderMapIfReady();
             }
           });
-          const [laResponse, latestResult, populationResponse] = await Promise.all([
+          const [laResponse, latestResult] = await Promise.all([
             laPromise,
             latestPromise,
-            populationPromise,
           ]);
           const latestResponse = latestResult?.latest || null;
           const latestAllResponse = latestResult?.latestAll || null;
@@ -4207,23 +4201,6 @@ function initHexMapCrController() {
             pconCodes.size || 0,
             AREA_LABEL_PLURAL,
           );
-          if (populationResponse && populationResponse.ok) {
-            const populationPayload = await populationResponse.json();
-            const populationRows = Array.isArray(populationPayload)
-              ? populationPayload
-              : populationPayload?.data || [];
-            const lookup = new Map();
-            populationRows.forEach((row) => {
-              const code = row?.geo_code;
-              if (!code || lookup.has(code)) {
-                return;
-              }
-              lookup.set(code, row);
-            });
-            populationLookup = lookup;
-          } else {
-            populationLookup = new Map();
-          }
           markHexMapTiming(timingId, "colored-ready");
           measureHexMapTiming(timingId, "load-to-colored-ready", "load:start", "colored-ready");
           if (isStale()) {
@@ -4519,9 +4496,10 @@ function initHexMapCrController() {
       }
 
       function buildSensorSearchRecords() {
-        const rowsForSearch = scopedLatestRowsAllWindow.length
+        const candidateRows = scopedLatestRowsAllWindow.length
           ? scopedLatestRowsAllWindow
           : (scopedLatestRows.length ? scopedLatestRows : baseLatestRowsAllWindow.length ? baseLatestRowsAllWindow : baseLatestRows);
+        const rowsForSearch = networkController.filterEligibleRows(candidateRows);
         const recordsByKey = new Map();
         rowsForSearch.forEach((row, index) => {
           const stationId = String(resolveStationKey(row) || `cr:${index}`);
@@ -4730,7 +4708,7 @@ function initHexMapCrController() {
         getPollutantLabel: () => getPollutantLabel(activePollutant),
         getColorForLaCode: (laCode) => {
           if (!colorScale) return null;
-          const row = pconLookup.get(laCode) || basePconLookup.get(laCode);
+          const row = pconLookup.get(laCode);
           const value = getMetricValue(row);
           if (!Number.isFinite(value)) return null;
           return colorScale(value);
@@ -4746,7 +4724,9 @@ function initHexMapCrController() {
         applyColorScale: (value) => colorScale ? colorScale(value) : null,
         getSensorCurrentColor: (stationId) => {
           if (!colorScale) return null;
-          const allRows = scopedLatestRows.length ? scopedLatestRows : baseLatestRows;
+          const allRows = networkController.filterEligibleRows(
+            scopedLatestRows.length ? scopedLatestRows : baseLatestRows,
+          );
           const pollutantRows = getRowsForActivePollutant(allRows);
           const targetStationId = String(stationId || "");
           const candidates = pollutantRows.filter((r) => String(resolveStationKey(r) || "") === targetStationId);
@@ -4774,7 +4754,8 @@ function initHexMapCrController() {
           setColorScale(settings.colorScale, { coordinated: true });
           setWindow(settings.window, { coordinated: true });
         },
-        activate: () => {
+        activate: ({ changed }) => {
+          if (changed) viewportFraming?.cancelViewportFrame?.();
           crController.render();
           crController.restoreNetworks();
           search?.preloadInactiveMap?.("cr");
@@ -4782,6 +4763,7 @@ function initHexMapCrController() {
         },
       });
       networkController.registerScope("cr", () => applyNetworkFilters());
+      void loadPopulation();
       return crController;
 }
 

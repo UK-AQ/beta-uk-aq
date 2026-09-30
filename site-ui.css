@@ -2,6 +2,72 @@
  * These rules must remain when the beta notice is retired.
  */
 
+/* Shared artwork-backed page titles, aligned with the Hex Map/News title area. */
+.ukaq-page-title-heading {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 92px;
+  margin: 0;
+  padding-right: 132px;
+}
+
+.ukaq-page-title-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.ukaq-page-title-picture {
+  display: block;
+  max-width: 100%;
+}
+
+.ukaq-page-title-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: 50.4px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+@media (max-width: 767px) {
+  .ukaq-page-title-heading {
+    min-height: 44px;
+    padding: 0 60px 0 52px;
+  }
+
+  .ukaq-page-title-image {
+    width: auto;
+    height: auto;
+    max-height: 42px;
+  }
+
+  body[data-page-slug="who-guidelines"] #ukaq-home-logo,
+  body[data-page-slug="naei-data"] #ukaq-home-logo,
+  body[data-page-slug="wood-burning"] #ukaq-home-logo,
+  body[data-page-slug="research"] #ukaq-home-logo {
+    top: 16px;
+    right: 12px;
+  }
+
+  body[data-page-slug="who-guidelines"] #ukaq-home-logo img,
+  body[data-page-slug="naei-data"] #ukaq-home-logo img,
+  body[data-page-slug="wood-burning"] #ukaq-home-logo img,
+  body[data-page-slug="research"] #ukaq-home-logo img {
+    width: clamp(44px, 13.333vw, 52px);
+    height: auto;
+  }
+}
+
 /* Keep the existing Hex Map coverage animation but round the visible fill end. */
 .hex-map-page .map-summary-coverage-fill {
   border-radius: inherit;

@@ -16,9 +16,8 @@
       showLabel: false,
       children: [
         { label: 'Hex Map',     iconImg: 'uk-aq-hex-map-sidebar.svg', href: '/hex_map/' },
-        //{ label: 'Sensors',     iconImg: 'uk-aq-sensors-icon-blue.svg',  href: '/sensors/' },
         { label: 'Sensor Map', iconImg: 'uk-aq-location-pin.svg',       href: '/sensor_map/' },
-        { label: 'AQ in the News', iconImg: 'uk-aq-news-sidebar-button.svg', href: '/news/', className: 'uk-aq-nav-item--wordmark uk-aq-nav-item--news' },
+        { label: 'AQ in the News', iconImg: 'uk-aq-news-sidebar-button.svg', href: '/news/', className: 'uk-aq-nav-item--wordmark uk-aq-nav-item--wordmark-spaced' },
       ],
     },
 /*    {
@@ -44,7 +43,8 @@
           href: 'https://youtube.com/@chronicillnesschannel',
           external: true,
         },
-*/        { label: 'Resources', iconImg: 'chain-link-icon-ukaqblue-200h.svg', href: '/resources/' },
+*/        { label: 'Blog', iconImg: 'uk-aq-blog-sidebar-button.svg', href: '/blog/', className: 'uk-aq-nav-item--wordmark uk-aq-nav-item--wordmark-spaced' },
+        { label: 'Resources', iconImg: 'chain-link-icon-ukaqblue-200h.svg', href: '/resources/' },
         { label: 'Contact', iconImg: 'uk-aq-contact-blue-200h.svg', href: '/contact.html' },
       ],
     },
@@ -58,7 +58,12 @@
   const SITE_VERSION_CACHE_KEY = 'uk_aq_site_version_v1';
   const SIDEBAR_NAV_HANDOFF_KEY = 'uk_aq_sidebar_nav_handoff_v1';
   const SIDEBAR_PINNED_KEY = 'uk_aq_sidebar_pinned_v1';
+  const FOOTER_NETWORK_CATALOG_CACHE_KEY = 'uk_aq_footer_network_catalog_v1';
+  const FOOTER_NETWORK_CATALOG_CONTRACT_VERSION = 2;
   const PUBLIC_NETWORK_CATALOG_URL = `${location.origin}/api/aq/networks`;
+  const PUBLIC_NETWORK_CATALOG_EVENT_WAIT_MS = 1500;
+  const PUBLIC_NETWORK_CATALOG_FETCH_TIMEOUT_MS = 10000;
+  const FOOTER_STYLESHEET_TIMEOUT_MS = 15000;
   let SITE_VERSION = readCachedSiteVersion();
   const SIDEBAR_ICON_OFF = '/sidebar-images/uk-aq-sidebar-off.svg';
   const SIDEBAR_ICON_ON = '/sidebar-images/uk-aq-sidebar-on.svg';
@@ -94,6 +99,51 @@
     } catch (_) {
       // Sidebar pin persistence is session-scoped and non-critical.
     }
+  }
+
+  function normaliseFooterNetworkCodes(rows, contractVersion) {
+    if (contractVersion !== FOOTER_NETWORK_CATALOG_CONTRACT_VERSION || !Array.isArray(rows)) {
+      throw new Error('network catalogue response does not match contract v2');
+    }
+
+    const networkCodes = rows.map((row) => String(row?.code || row?.network_code || '').trim());
+    if (networkCodes.some((networkCode) => !networkCode)) {
+      throw new Error('network catalogue response contains a missing network_code');
+    }
+    return [...new Set(networkCodes)];
+  }
+
+  function readCachedFooterNetworkCatalog() {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(FOOTER_NETWORK_CATALOG_CACHE_KEY) || 'null');
+      if (
+        cached?.contractVersion !== FOOTER_NETWORK_CATALOG_CONTRACT_VERSION
+        || !Array.isArray(cached.networkCodes)
+        || cached.networkCodes.some((networkCode) => (
+          typeof networkCode !== 'string' || !networkCode.trim()
+        ))
+      ) {
+        return null;
+      }
+      return [...new Set(cached.networkCodes.map((networkCode) => networkCode.trim()))];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeCachedFooterNetworkCatalog(networkCodes) {
+    try {
+      sessionStorage.setItem(FOOTER_NETWORK_CATALOG_CACHE_KEY, JSON.stringify({
+        contractVersion: FOOTER_NETWORK_CATALOG_CONTRACT_VERSION,
+        networkCodes,
+      }));
+    } catch (_) {
+      // Session storage is an optimisation only.
+    }
+  }
+
+  function isManualReload() {
+    return performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload';
   }
 
   function rememberSidebarNavHandoff() {
@@ -143,37 +193,32 @@
     }
   }
 
-  function applyFooterAttributions(rows, contractVersion) {
+  function applyFooterAttributions(networkCodes) {
     const footer = document.getElementById('ukaq-site-footer');
     if (!footer) return;
-
-    if (contractVersion !== 2 || !Array.isArray(rows)) {
-      throw new Error('network catalogue response does not match contract v2');
-    }
-
-    const returnedNetworkCodes = rows
-      .map((row) => String(row?.code || row?.network_code || '').trim());
-    if (returnedNetworkCodes.some((networkCode) => !networkCode)) {
-      throw new Error('network catalogue response contains a missing network_code');
-    }
-    const publicNetworkCodes = new Set(returnedNetworkCodes);
-    const attributionSections = Array.from(
-      footer.querySelectorAll('.ukaq-site-footer-source[data-network-code]'),
+    const publicNetworkCodes = new Set(networkCodes);
+    const attributionDefinitions = Array.from(
+      footer.querySelectorAll('.ukaq-site-footer-source [data-network-code], .ukaq-site-footer-source[data-network-code]'),
     );
     const definedNetworkCodes = new Set(
-      attributionSections.map((section) => section.dataset.networkCode),
+      attributionDefinitions.map((definition) => definition.dataset.networkCode),
     );
 
-    attributionSections.forEach((section) => {
+    footer.querySelectorAll('.ukaq-site-footer-source[data-network-code]').forEach((section) => {
       if (!publicNetworkCodes.has(section.dataset.networkCode)) section.remove();
     });
 
-    const sources = footer.querySelector('.ukaq-site-footer-sources');
-    const visibleCount = sources?.querySelectorAll('.ukaq-site-footer-source').length || 0;
-    if (sources) {
-      sources.dataset.sourceCount = String(visibleCount);
-      sources.hidden = visibleCount === 0;
-    }
+    footer.querySelectorAll('.ukaq-site-footer-source[data-network-group]').forEach((section) => {
+      const networkMarks = Array.from(section.querySelectorAll('[data-network-code]'));
+      networkMarks.forEach((mark) => {
+        if (!publicNetworkCodes.has(mark.dataset.networkCode)) mark.remove();
+      });
+      if (!networkMarks.some((mark) => publicNetworkCodes.has(mark.dataset.networkCode))) {
+        section.remove();
+      }
+    });
+
+    finaliseFooterAttributionLayout();
 
     const missingDefinitions = [...publicNetworkCodes]
       .filter((networkCode) => !definedNetworkCodes.has(networkCode));
@@ -185,39 +230,114 @@
     }
   }
 
+  function finaliseFooterAttributionLayout() {
+    const footer = document.getElementById('ukaq-site-footer');
+    if (!footer) return;
+
+    const sources = footer.querySelector('.ukaq-site-footer-sources');
+    const visibleCount = sources?.querySelectorAll('.ukaq-site-footer-source').length || 0;
+    if (sources) {
+      sources.dataset.sourceCount = String(visibleCount);
+      sources.hidden = visibleCount === 0;
+    }
+  }
+
   async function filterFooterAttributions() {
     try {
+      if (!isManualReload()) {
+        const cachedNetworkCodes = readCachedFooterNetworkCatalog();
+        if (cachedNetworkCodes) {
+          applyFooterAttributions(cachedNetworkCodes);
+          return;
+        }
+      }
+
       const existingSnapshot = window.UkAqPublicNetworkCatalogSnapshot;
       if (existingSnapshot) {
-        applyFooterAttributions(existingSnapshot.rows, existingSnapshot.contractVersion);
+        const networkCodes = normaliseFooterNetworkCodes(
+          existingSnapshot.rows,
+          existingSnapshot.contractVersion,
+        );
+        applyFooterAttributions(networkCodes);
+        writeCachedFooterNetworkCatalog(networkCodes);
         return;
       }
 
       if (window.UkAqNetworkCatalog?.load) {
-        window.addEventListener('ukaq:public-network-catalog', (event) => {
-          try {
-            applyFooterAttributions(event.detail?.rows, event.detail?.contractVersion);
-          } catch (error) {
-            console.warn('UK AQ footer received an invalid network catalogue; retaining all attributions', error);
-          }
-        }, { once: true });
-        return;
+        const eventSnapshot = await waitForPublicNetworkCatalogEvent();
+        if (eventSnapshot) {
+          const networkCodes = normaliseFooterNetworkCodes(
+            eventSnapshot.rows,
+            eventSnapshot.contractVersion,
+          );
+          applyFooterAttributions(networkCodes);
+          writeCachedFooterNetworkCatalog(networkCodes);
+          return;
+        }
       }
 
-      const response = await fetch(PUBLIC_NETWORK_CATALOG_URL, {
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-      });
+      const controller = new AbortController();
+      const timeout = window.setTimeout(
+        () => controller.abort(),
+        PUBLIC_NETWORK_CATALOG_FETCH_TIMEOUT_MS,
+      );
+      let response;
+      try {
+        response = await fetch(PUBLIC_NETWORK_CATALOG_URL, {
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+      } finally {
+        window.clearTimeout(timeout);
+      }
       if (!response.ok) {
         throw new Error(`network catalogue request failed (${response.status})`);
       }
 
       const payload = await response.json();
-      applyFooterAttributions(payload?.data, payload?.contract_version);
+      const networkCodes = normaliseFooterNetworkCodes(payload?.data, payload?.contract_version);
+      applyFooterAttributions(networkCodes);
+      writeCachedFooterNetworkCatalog(networkCodes);
     } catch (error) {
       console.warn('UK AQ footer network catalogue failed to load; retaining all attributions', error);
+      finaliseFooterAttributionLayout();
     }
   }
+
+  function waitForPublicNetworkCatalogEvent() {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (snapshot) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('ukaq:public-network-catalog', onCatalog);
+        window.clearTimeout(timeout);
+        resolve(snapshot);
+      };
+      const onCatalog = (event) => finish(event.detail);
+      const timeout = window.setTimeout(
+        () => finish(null),
+        PUBLIC_NETWORK_CATALOG_EVENT_WAIT_MS,
+      );
+      window.addEventListener('ukaq:public-network-catalog', onCatalog, { once: true });
+
+      const snapshot = window.UkAqPublicNetworkCatalogSnapshot;
+      if (snapshot) finish(snapshot);
+    });
+  }
+
+  // A valid catalogue published after the footer is visible may prepare the next
+  // navigation, but must not mutate the already-finalised footer on this page.
+  window.addEventListener('ukaq:public-network-catalog', (event) => {
+    try {
+      const snapshot = event.detail;
+      const networkCodes = normaliseFooterNetworkCodes(snapshot?.rows, snapshot?.contractVersion);
+      writeCachedFooterNetworkCatalog(networkCodes);
+    } catch (_) {
+      // Rejected catalogue state must never replace a previously validated cache.
+    }
+  });
 
   // ─── Preload default sidebar button image; lazy-warm the alternate icon ─────
   const sidebarIconOffHref = location.origin + SIDEBAR_ICON_OFF;
@@ -332,6 +452,11 @@
       --uk-aq-sidebar-drawer-w:      212px;
       --uk-aq-ease:          0.3s ease;
       --uk-aq-font:          'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    #uk-aq-sidebar,
+    #uk-aq-sidebar * {
+      box-sizing: content-box;
     }
 
     /* ── Body shift ── */
@@ -553,6 +678,25 @@
       color: var(--uk-aq-accent-deep);
       border-color: #d6d0c8;
     }
+    .uk-aq-nav-item--pending {
+      cursor: not-allowed;
+      opacity: 0.62;
+    }
+    .uk-aq-nav-item--pending:hover {
+      background: transparent;
+      color: var(--uk-aq-ink-2);
+    }
+    .uk-aq-visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     .uk-aq-nav-icon {
       width: 20px; flex-shrink: 0;
       display: inline-flex; align-items: center; justify-content: center;
@@ -579,6 +723,15 @@
       object-fit: contain;
       display: block;
     }
+    /* Enlarge the artwork only; the existing 40px icon box and row spacing stay unchanged. */
+    .uk-aq-nav-item--stove .uk-aq-nav-icon-img {
+      transform: scale(1.25);
+      transform-origin: center;
+    }
+    .uk-aq-nav-item--research .uk-aq-nav-icon-img {
+      transform: scale(1.12);
+      transform-origin: center;
+    }
 	.uk-aq-nav-item--wordmark {
 	  overflow: visible;
 	}
@@ -598,7 +751,7 @@
       max-height: 24px !important;
       object-fit: contain;
     }
-    .uk-aq-nav-item--news .uk-aq-nav-label {
+    .uk-aq-nav-item--wordmark-spaced .uk-aq-nav-label {
       margin-left: 3px;
     }
     .uk-aq-nav-icon-placeholder {
@@ -673,13 +826,13 @@
   function buildNavItem(item) {
     const path = location.pathname;
     const pathWithSearch = location.pathname + location.search;
-    const href = item.href;
-    const isActive = href !== '#' && (
+    const href = item.href || '';
+    const isActive = Boolean(href) && (
       href === '/' || href === '/index.html'
         ? isHomePage()
         : (href.includes('?') ? pathWithSearch.includes(href) : path.includes(href))
     );
-    const className = item.className ? ` ${item.className}` : '';
+    const className = `${item.className ? ` ${item.className}` : ''}${item.pending ? ' uk-aq-nav-item--pending' : ''}`;
   const usesCentredIconSlot =
     item.className?.includes('uk-aq-home-nav-item')
     || item.className?.includes('uk-aq-nav-item--wordmark');
@@ -699,11 +852,16 @@
       ? `<img class="uk-aq-nav-label-img" src="${location.origin}/sidebar-images/${item.labelImg}" alt="${item.label}">`
       : item.label;
     const targetAttrs = item.external ? ' target="_blank" rel="noopener noreferrer"' : '';
+    const openTag = item.pending
+      ? `<span class="uk-aq-nav-item${className}" role="link" aria-disabled="true" title="Coming soon">`
+      : `<a class="uk-aq-nav-item${className}${isActive ? ' active' : ''}" href="${href}"${targetAttrs}>`;
+    const closeTag = item.pending ? '</span>' : '</a>';
+    const pendingText = item.pending ? '<span class="uk-aq-visually-hidden"> (coming soon)</span>' : '';
     return `
-      <a class="uk-aq-nav-item${className}${isActive ? ' active' : ''}" href="${href}"${targetAttrs}>
+      ${openTag}
         ${iconHtml}
-        <span class="uk-aq-nav-label">${labelHtml}</span>
-      </a>`;
+        <span class="uk-aq-nav-label">${labelHtml}${pendingText}</span>
+      ${closeTag}`;
   }
 
   function buildSection(section) {
@@ -713,7 +871,7 @@
       : `<div class="uk-aq-section-label">${section.label}</div>`;
     const divider = section.dividerBefore ? '<div class="uk-aq-section-divider" aria-hidden="true"></div>' : '';
     return `
-      <div class="uk-aq-nav-section">
+      <div class="uk-aq-nav-section uk-aq-nav-section--${section.id}">
         ${divider}
         ${sectionLabel}
         ${childrenHtml}
@@ -740,9 +898,10 @@
     return `
       <p class="ukaq-site-footer-meta">&copy; 2026 UK AQ${versionSuffix()}</p>
       <div class="ukaq-site-footer-sources" aria-label="Air quality data sources and licences">
-        <section class="ukaq-site-footer-source" data-network-code="gov_uk_aurn" aria-label="GOV.UK and UK-AIR attribution">
+        <section class="ukaq-site-footer-source" data-network-group="defra-uk-air" aria-label="Defra and UK-AIR attribution">
           <div class="ukaq-site-footer-mark">
-            <a class="ukaq-site-footer-gov-pill" href="https://uk-air.defra.gov.uk/" aria-label="GOV.UK AURN">GOV.UK AURN</a>
+            <a class="ukaq-site-footer-gov-pill" data-network-code="gov_uk_aurn" href="https://uk-air.defra.gov.uk/" aria-label="GOV.UK AURN">GOV.UK AURN</a>
+            <a class="ukaq-site-footer-gov-pill" data-network-code="black_carbon" href="https://uk-air.defra.gov.uk/" aria-label="Black Carbon">Black Carbon</a>
           </div>
           <p class="ukaq-site-footer-copy">&copy; Crown 2026 copyright Defra via <a href="https://uk-air.defra.gov.uk/">uk-air.defra.gov.uk</a>, licenced under the <a href="${oglUrl}">Open Government Licence (OGL)</a>.</p>
         </section>
@@ -778,13 +937,15 @@
   }
 
   function mountSiteFooter() {
-    if (document.getElementById('ukaq-site-footer')) return;
+    const existing = document.getElementById('ukaq-site-footer');
+    if (existing) return existing;
 
     const oldHomeFooter = document.querySelector('.home-footer');
     if (oldHomeFooter) oldHomeFooter.remove();
 
     const footer = document.createElement('footer');
     footer.id = 'ukaq-site-footer';
+    footer.hidden = true;
     footer.setAttribute('aria-label', 'UK AQ site information and data licences');
     footer.innerHTML = buildSiteFooter();
 
@@ -793,31 +954,46 @@
     }
 
     document.body.appendChild(footer);
+    return footer;
   }
 
   function ensureSiteFooterStyles() {
+    const waitForStylesheet = (link) => new Promise((resolve) => {
+      let settled = false;
+      const finish = (loaded, reason) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        link.removeEventListener('load', onLoad);
+        link.removeEventListener('error', onError);
+        if (!loaded) {
+          console.warn(`UK AQ footer stylesheet failed to load (${reason}); footer will remain hidden`);
+        }
+        resolve(loaded);
+      };
+      const onLoad = () => finish(true, 'load');
+      const onError = () => finish(false, 'error');
+      const timeout = window.setTimeout(
+        () => finish(false, 'timeout'),
+        FOOTER_STYLESHEET_TIMEOUT_MS,
+      );
+      link.addEventListener('load', onLoad, { once: true });
+      link.addEventListener('error', onError, { once: true });
+    });
+
     const existing = document.getElementById('ukaq-site-footer-styles');
     if (existing) {
-      if (existing.sheet) return Promise.resolve();
-      return new Promise((resolve) => {
-        const done = () => resolve();
-        existing.addEventListener('load', done, { once: true });
-        existing.addEventListener('error', done, { once: true });
-        window.setTimeout(done, 1500);
-      });
+      if (existing.sheet) return Promise.resolve(true);
+      return waitForStylesheet(existing);
     }
 
-    return new Promise((resolve) => {
-      const link = document.createElement('link');
-      link.id = 'ukaq-site-footer-styles';
-      link.rel = 'stylesheet';
-      link.href = `${location.origin}/site-footer.css`;
-      const done = () => resolve();
-      link.addEventListener('load', done, { once: true });
-      link.addEventListener('error', done, { once: true });
-      document.head.appendChild(link);
-      window.setTimeout(done, 1500);
-    });
+    const link = document.createElement('link');
+    link.id = 'ukaq-site-footer-styles';
+    link.rel = 'stylesheet';
+    link.href = `${location.origin}/site-footer.css`;
+    const stylesheetReady = waitForStylesheet(link);
+    document.head.appendChild(link);
+    return stylesheetReady;
   }
 
   // ─── Mount ────────────────────────────────────────────────────────────────────
@@ -864,16 +1040,7 @@
 
     // Shared top-right UK AQ home logo
     const homeLogo = document.createElement('a');
-	const twoLineMobileLogoPages = new Set([
-	  'sensor-map',
-	  'resources',
-	  'contact',
-	  'news',
-	]);
-    const mobileHomeLogoSrc = document.body.classList.contains('hex-map-page')
-      || twoLineMobileLogoPages.has(document.body.dataset.pageSlug)
-      ? '/sidebar-images/UK-AQ-Logo-v3-2Lines.svg'
-      : '/images/UK-AQ-Logo-v3-1line.svg';
+    const mobileHomeLogoSrc = '/sidebar-images/UK-AQ-Logo-v3-2Lines.svg';
     homeLogo.id = 'ukaq-home-logo';
     homeLogo.href = '/';
     homeLogo.setAttribute('aria-label', 'UK AQ home');
@@ -902,13 +1069,10 @@
     updateHamburgerIcon(btn);
 
     bindEvents(btn, overlay);
-    window.dispatchEvent(new CustomEvent('ukaq:sidebar-ready'));
-
-    // Metadata, web fonts and the page footer are non-critical to shared chrome.
-    void mountNonCritical();
+    void completeSharedChrome();
   }
 
-  async function mountNonCritical() {
+  async function completeSharedChrome() {
     if (!document.getElementById('uk-aq-inter-font')) {
       const link = document.createElement('link');
       link.id = 'uk-aq-inter-font';
@@ -918,19 +1082,11 @@
     }
 
     siteVersionReady = loadSiteVersion();
-    await ensureSiteFooterStyles();
-
-    const finishFooter = () => {
-      mountSiteFooter();
-      void filterFooterAttributions();
-    };
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', finishFooter, { once: true });
-    } else {
-      finishFooter();
-    }
-
-    await siteVersionReady;
+    const footerStylesReady = await ensureSiteFooterStyles();
+    const footer = mountSiteFooter();
+    await filterFooterAttributions();
+    if (footerStylesReady) footer.hidden = false;
+    window.dispatchEvent(new CustomEvent('ukaq:sidebar-ready'));
   }
 
   // ─── Events ───────────────────────────────────────────────────────────────────

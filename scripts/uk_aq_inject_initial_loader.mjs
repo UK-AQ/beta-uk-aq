@@ -14,6 +14,27 @@ const HASH_LENGTH = 12;
 
 async function main() {
   const args = nodeProcess.argv.slice(2);
+  if (args[0] === "--render-html") {
+    if (args.length !== 3) {
+      throw new Error("Usage: node scripts/uk_aq_inject_initial_loader.mjs --render-html <site-root> <html-path>");
+    }
+    const siteRoot = path.resolve(nodeProcess.cwd(), args[1]);
+    const htmlPath = path.resolve(nodeProcess.cwd(), args[2]);
+    const relativeHtmlPath = path.relative(siteRoot, htmlPath);
+    if (
+      !relativeHtmlPath
+      || relativeHtmlPath.startsWith(`..${path.sep}`)
+      || path.isAbsolute(relativeHtmlPath)
+      || !relativeHtmlPath.toLowerCase().endsWith(".html")
+    ) {
+      throw new Error(`HTML path must be an .html file inside the site root: ${htmlPath}`);
+    }
+    const loaderUrl = await buildLoaderUrl(siteRoot);
+    const html = await fs.readFile(htmlPath, "utf8");
+    nodeProcess.stdout.write(injectInitialLoader(html, relativeHtmlPath, loaderUrl));
+    return;
+  }
+
   if (args.length !== 1 || !String(args[0] || "").trim()) {
     throw new Error(`Usage: node scripts/uk_aq_inject_initial_loader.mjs <path>/${STAGING_DIRECTORY_NAME}`);
   }
@@ -21,44 +42,51 @@ async function main() {
   const targetRoot = path.resolve(nodeProcess.cwd(), args[0]);
   await validateTargetRoot(targetRoot);
 
-  const loaderBytes = await fs.readFile(path.join(targetRoot, LOADER_IMAGE_PATH));
-  const loaderHash = crypto.createHash("sha256").update(loaderBytes).digest("hex").slice(0, HASH_LENGTH);
-  const loaderUrl = `/${LOADER_IMAGE_PATH}?v=${loaderHash}`;
+  const loaderUrl = await buildLoaderUrl(targetRoot);
   const htmlPaths = await collectActiveHtmlPaths(targetRoot);
 
   let injectedCount = 0;
   for (const htmlPath of htmlPaths) {
     const absolutePath = path.join(targetRoot, htmlPath);
     const html = await fs.readFile(absolutePath, "utf8");
-    if (html.includes(INJECT_MARKER)) {
-      throw new Error(`Initial loader marker already present in active document: ${htmlPath}`);
-    }
-
-    const headCloseCount = (html.match(/<\/head\s*>/gi) || []).length;
-    const bodyOpenMatches = [...html.matchAll(/<body\b[^>]*>/gi)];
-    if (headCloseCount !== 1 || bodyOpenMatches.length !== 1) {
-      throw new Error(
-        `Expected exactly one </head> and one <body> in ${htmlPath}; found head=${headCloseCount} body=${bodyOpenMatches.length}`,
-      );
-    }
-
-    const expectsSidebar = /<script\b[^>]*\bsrc\s*=\s*["'][^"']*sidebar\.js(?:\?[^"']*)?["'][^>]*>/i.test(html);
-    const headBlock = buildHeadBlock({ expectsSidebar, loaderUrl });
-    const bodyBlock = buildBodyBlock(loaderUrl);
-
-    let updated = html.replace(/<\/head\s*>/i, `${headBlock}\n</head>`);
-    const bodyIndex = updated.search(/<body\b[^>]*>/i);
-    if (bodyIndex < 0) throw new Error(`Body marker disappeared while injecting ${htmlPath}`);
-    const bodyTag = updated.match(/<body\b[^>]*>/i)?.[0];
-    if (!bodyTag) throw new Error(`Unable to resolve body tag while injecting ${htmlPath}`);
-    const insertAt = bodyIndex + bodyTag.length;
-    updated = `${updated.slice(0, insertAt)}\n${bodyBlock}${updated.slice(insertAt)}`;
-
+    const updated = injectInitialLoader(html, htmlPath, loaderUrl);
     await fs.writeFile(absolutePath, updated, "utf8");
     injectedCount += 1;
   }
 
   console.log(`Injected UK AQ initial loader into ${injectedCount} active HTML files.`);
+}
+
+async function buildLoaderUrl(siteRoot) {
+  const loaderBytes = await fs.readFile(path.join(siteRoot, LOADER_IMAGE_PATH));
+  const loaderHash = crypto.createHash("sha256").update(loaderBytes).digest("hex").slice(0, HASH_LENGTH);
+  return `/${LOADER_IMAGE_PATH}?v=${loaderHash}`;
+}
+
+function injectInitialLoader(html, htmlPath, loaderUrl) {
+  if (html.includes(INJECT_MARKER)) {
+    throw new Error(`Initial loader marker already present in active document: ${htmlPath}`);
+  }
+
+  const headCloseCount = (html.match(/<\/head\s*>/gi) || []).length;
+  const bodyOpenMatches = [...html.matchAll(/<body\b[^>]*>/gi)];
+  if (headCloseCount !== 1 || bodyOpenMatches.length !== 1) {
+    throw new Error(
+      `Expected exactly one </head> and one <body> in ${htmlPath}; found head=${headCloseCount} body=${bodyOpenMatches.length}`,
+    );
+  }
+
+  const expectsSidebar = /<script\b[^>]*\bsrc\s*=\s*["'][^"']*sidebar\.js(?:\?[^"']*)?["'][^>]*>/i.test(html);
+  const headBlock = buildHeadBlock({ expectsSidebar, loaderUrl });
+  const bodyBlock = buildBodyBlock(loaderUrl);
+
+  let updated = html.replace(/<\/head\s*>/i, `${headBlock}\n</head>`);
+  const bodyIndex = updated.search(/<body\b[^>]*>/i);
+  if (bodyIndex < 0) throw new Error(`Body marker disappeared while injecting ${htmlPath}`);
+  const bodyTag = updated.match(/<body\b[^>]*>/i)?.[0];
+  if (!bodyTag) throw new Error(`Unable to resolve body tag while injecting ${htmlPath}`);
+  const insertAt = bodyIndex + bodyTag.length;
+  return `${updated.slice(0, insertAt)}\n${bodyBlock}${updated.slice(insertAt)}`;
 }
 
 async function validateTargetRoot(targetRoot) {
@@ -140,12 +168,24 @@ function buildHeadBlock({ expectsSidebar, loaderUrl }) {
   <script ${INJECT_MARKER}>
     (() => {
       const SESSION_KEY = "uk_aq_initial_visual_loaded_v1";
+      const FOOTER_NETWORK_CATALOG_CACHE_KEY = "uk_aq_footer_network_catalog_v1";
       const EXPECTS_SIDEBAR = ${expectsSidebar ? "true" : "false"};
       const navigation = performance.getEntriesByType?.("navigation")?.[0];
       const navigationType = navigation?.type || "navigate";
       let seenInTab = false;
       try { seenInTab = sessionStorage.getItem(SESSION_KEY) === "1"; } catch (_) {}
-      const active = navigationType === "reload" || !seenInTab;
+      let hasValidFooterNetworkCache = false;
+      try {
+        const cached = JSON.parse(sessionStorage.getItem(FOOTER_NETWORK_CATALOG_CACHE_KEY) || "null");
+        hasValidFooterNetworkCache = cached?.contractVersion === 2
+          && Array.isArray(cached.networkCodes)
+          && cached.networkCodes.every((networkCode) => (
+            typeof networkCode === "string" && Boolean(networkCode.trim())
+          ));
+      } catch (_) {}
+      const active = navigationType === "reload"
+        || !seenInTab
+        || (EXPECTS_SIDEBAR && !hasValidFooterNetworkCache);
       window.__UKAQ_INITIAL_LOAD_ACTIVE__ = active;
 
       if (active) document.documentElement.classList.add("ukaq-initial-loading");
@@ -154,7 +194,6 @@ function buildHeadBlock({ expectsSidebar, loaderUrl }) {
       let windowLoaded = document.readyState === "complete";
       let sidebarReady = !EXPECTS_SIDEBAR;
       let revealed = false;
-      let fallbackTimer = 0;
 
       const dispatchRevealed = () => {
         if (window.__UKAQ_INITIAL_VISUAL_REVEALED__) return;
@@ -206,7 +245,6 @@ function buildHeadBlock({ expectsSidebar, loaderUrl }) {
       const reveal = () => {
         if (revealed) return;
         revealed = true;
-        if (fallbackTimer) window.clearTimeout(fallbackTimer);
         try { sessionStorage.setItem(SESSION_KEY, "1"); } catch (_) {}
 
         const loader = document.getElementById("ukaq-initial-loader");
@@ -247,9 +285,6 @@ function buildHeadBlock({ expectsSidebar, loaderUrl }) {
       window.addEventListener("load", () => {
         windowLoaded = true;
         maybeReveal();
-        if (!revealed) {
-          fallbackTimer = window.setTimeout(reveal, 1500);
-        }
       }, { once: true });
 
       window.addEventListener("ukaq:sidebar-ready", () => {
@@ -259,7 +294,6 @@ function buildHeadBlock({ expectsSidebar, loaderUrl }) {
 
       if (windowLoaded) {
         maybeReveal();
-        if (!revealed) fallbackTimer = window.setTimeout(reveal, 1500);
       }
     })();
   </script>
