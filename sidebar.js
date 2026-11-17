@@ -162,6 +162,7 @@
       children: [
         { label: 'Hex Map',     iconImg: 'uk-aq-hex-map-sidebar.svg', href: '/hex_map/' },
         { label: 'Sensor Map', iconImg: 'uk-aq-location-pin.svg',       href: '/sensor_map/' },
+        { label: 'Wood Burning', iconImg: 'uk-aq-wood-burning-stove.png', href: '/wood-burning/', className: 'uk-aq-nav-item--stove' },
         { label: 'AQ in the News', iconImg: 'uk-aq-news-sidebar-button.svg', href: '/news/', className: 'uk-aq-nav-item--wordmark uk-aq-nav-item--wordmark-spaced' },
       ],
     },
